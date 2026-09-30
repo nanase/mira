@@ -1,0 +1,329 @@
+html,
+body {
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+}
+
+/* 影を描く余白としてウィンドウの内側に 10px 空ける */
+.popover {
+  width: 320px;
+  margin: 10px;
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  border-radius: 8px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+  padding-bottom: 12px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 10px 10px 16px;
+}
+
+.header-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-grow: 1;
+  min-width: 0;
+}
+
+.profile-picker {
+  position: relative;
+}
+
+.profile-button {
+  all: unset;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.profile-button:disabled {
+  cursor: default;
+}
+
+.profile-button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-button svg {
+  flex-shrink: 0;
+  fill: none;
+  stroke: currentColor;
+}
+
+.profile-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: -6px;
+  z-index: 10;
+  min-width: 200px;
+  max-width: 280px;
+  padding: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--stroke-strong);
+  border-radius: 6px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+}
+
+.menu button {
+  all: unset;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.menu button:hover,
+.menu button:focus-visible {
+  background: var(--hover);
+}
+
+.menu .check {
+  width: 14px;
+  flex-shrink: 0;
+  display: flex;
+}
+
+.menu .check svg {
+  fill: none;
+  stroke: var(--accent);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.menu .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status {
+  all: unset;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.status:hover {
+  text-decoration: underline;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--muted);
+  flex-shrink: 0;
+}
+
+.divider {
+  height: 1px;
+  background: var(--stroke);
+  margin: 0 16px;
+}
+
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 12px 0;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.banner svg {
+  flex-shrink: 0;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.banner.expired,
+.banner.stale {
+  background: color-mix(in srgb, var(--orange) var(--banner-mix), transparent);
+}
+
+.banner.expired svg,
+.banner.stale svg {
+  color: var(--orange);
+}
+
+.banner.failed {
+  background: color-mix(in srgb, var(--yellow) var(--banner-mix), transparent);
+}
+
+.banner.failed svg {
+  color: var(--yellow);
+}
+
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px 0;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--stroke);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+
+.card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.card-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.tag {
+  font-size: 10px;
+  font-weight: 500;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--tag-bg);
+  color: var(--muted);
+}
+
+.grow {
+  flex-grow: 1;
+}
+
+.percent {
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.card-sub {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 1px;
+}
+
+.bar {
+  position: relative;
+  height: 8px;
+  margin-top: 7px;
+}
+
+.bar-track,
+.bar-fill {
+  position: absolute;
+  left: 0;
+  top: 2px;
+  height: 4px;
+  border-radius: 2px;
+}
+
+.bar-track {
+  right: 0;
+  background: var(--track);
+}
+
+.bar-fill {
+  transition: width 0.5s ease;
+}
+
+.bar-marker {
+  position: absolute;
+  top: 0;
+  width: 2.5px;
+  height: 8px;
+  border-radius: 1px;
+}
+
+.card-reset {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 6px;
+}
+
+.balance {
+  display: flex;
+  align-items: baseline;
+  padding: 4px 4px 0;
+  font-size: 12px;
+}
+
+.balance .label {
+  color: var(--muted);
+  flex-grow: 1;
+}
+
+.balance .value {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--green);
+}
+
+.message {
+  padding: 16px 4px 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.footer {
+  padding: 10px 16px 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.level-0 {
+  color: var(--green);
+}
+
+.level-1 {
+  color: var(--orange);
+}
+
+.level-2 {
+  color: var(--red);
+}
+
+.fill-0 {
+  background: var(--green);
+}
+
+.fill-1 {
+  background: var(--orange);
+}
+
+.fill-2 {
+  background: var(--red);
+}

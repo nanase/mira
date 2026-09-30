@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>Mira</title>
+<link rel="stylesheet" href="common.css">
+<link rel="stylesheet" href="popover.css">
+<script type="module" src="popover.js"></script>
+</head>
+<body>
+<div class="popover" id="popover">
+  <header class="header" id="header">
+    <div class="header-text" id="header-text">
+      <div class="profile-picker">
+        <button type="button" class="profile-button" id="profile-button" aria-haspopup="menu" aria-expanded="false"></button>
+        <div class="menu hidden" id="profile-menu" role="menu"></div>
+      </div>
+      <button type="button" class="status" id="status"><span class="status-dot" id="status-dot"></span><span id="status-text"></span></button>
+    </div>
+    <button type="button" class="icon-button" id="pin"></button>
+    <button type="button" class="icon-button" id="refresh"></button>
+    <button type="button" class="icon-button" id="settings"></button>
+  </header>
+  <div class="divider"></div>
+  <div id="banner"></div>
+  <div class="cards" id="cards"></div>
+  <div class="footer" id="footer"></div>
+</div>
+</body>
+</html>

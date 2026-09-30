@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <!-- 赤く脈動する変光星ミラにちなんだ赤のグラデーション。下ほど明るい -->
+    <linearGradient id="red" gradientUnits="userSpaceOnUse" x1="128" y1="40" x2="128" y2="216">
+      <stop offset="0" stop-color="#b8183f"/>
+      <stop offset="0.5" stop-color="#e5334a"/>
+      <stop offset="1" stop-color="#ff7a59"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="56" fill="#151a36"/>
+  <!-- 使用量のリング。切れ目が右上に来る -->
+  <circle cx="128" cy="128" r="84" fill="none" stroke="#ffffff" stroke-opacity="0.16" stroke-width="16"/>
+  <circle cx="128" cy="128" r="84" fill="none" stroke="url(#red)" stroke-width="16" stroke-dasharray="327.2 528" stroke-linecap="round" transform="rotate(47 128 128)"/>
+  <!-- 中央の星 -->
+  <path d="M128 70 C133 110 146 123 186 128 C146 133 133 146 128 186 C123 146 110 133 70 128 C110 123 123 110 128 70 Z" fill="#fff4d6"/>
+  <!-- 時間マーカー -->
+  <line x1="128" y1="202" x2="128" y2="226" stroke="#ffffff" stroke-width="10" stroke-linecap="round"/>
+</svg>
