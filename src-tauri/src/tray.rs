@@ -18,7 +18,7 @@ const EMPTY_ID: &str = "mira-empty";
 #[derive(Default)]
 pub struct TrayIds(Mutex<Vec<String>>);
 
-fn tray_id(profile_id: &str) -> String {
+pub fn tray_id(profile_id: &str) -> String {
     format!("mira-{profile_id}")
 }
 

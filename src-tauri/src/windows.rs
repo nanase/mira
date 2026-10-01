@@ -4,7 +4,7 @@ use crate::state::{AppState, RefreshKind};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 use tauri::{
-    AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, PhysicalSize, WebviewUrl,
+    AppHandle, Emitter, LogicalSize, Manager, Monitor, PhysicalPosition, PhysicalSize, WebviewUrl,
     WebviewWindowBuilder, WindowEvent,
 };
 
@@ -62,6 +62,8 @@ pub fn setup_popover(app: &AppHandle) {
 }
 
 /// トレイアイコンのクリック。表示中なら隠し、そうでなければそのプロファイルで開く。
+///
+/// `rect` が None（メニューから開いたとき）は、トレイアイコンの今の位置を取り直して使う。
 pub fn toggle_popover(app: &AppHandle, profile_id: &str, rect: Option<tauri::Rect>) {
     let Some(win) = app.get_webview_window(POPOVER) else {
         return;
@@ -85,12 +87,34 @@ pub fn toggle_popover(app: &AppHandle, profile_id: &str, rect: Option<tauri::Rec
         {
             return;
         }
+    }
+    open_popover(app, profile_id, rect);
+}
+
+/// トレイアイコンの今の位置。隠れているアイコンの一覧が閉じていると取れない。
+fn tray_rect(app: &AppHandle, profile_id: &str) -> Option<tauri::Rect> {
+    app.tray_by_id(crate::tray::tray_id(profile_id).as_str())
+        .and_then(|tray| tray.rect().ok().flatten())
+}
+
+fn to_anchor(rect: tauri::Rect) -> (f64, f64, f64, f64) {
+    let pos = rect.position.to_physical::<f64>(1.0);
+    let size = rect.size.to_physical::<f64>(1.0);
+    (pos.x, pos.y, size.width, size.height)
+}
+
+fn open_popover(app: &AppHandle, profile_id: &str, rect: Option<tauri::Rect>) {
+    let Some(win) = app.get_webview_window(POPOVER) else {
+        return;
+    };
+    let visible = win.is_visible().unwrap_or(false);
+    // ディスプレイの構成が変わると前回の位置は当てにならないので、取り直せなければ捨てる
+    let anchor = rect.or_else(|| tray_rect(app, profile_id)).map(to_anchor);
+    {
+        let popover = app.state::<Popover>();
+        let mut p = popover.lock();
         p.profile_id = Some(profile_id.to_owned());
-        if let Some(rect) = rect {
-            let pos = rect.position.to_physical::<f64>(1.0);
-            let size = rect.size.to_physical::<f64>(1.0);
-            p.anchor = Some((pos.x, pos.y, size.width, size.height));
-        }
+        p.anchor = anchor;
         p.pending_show = !visible;
     }
     app.state::<AppState>().request_refresh(RefreshKind::Soft);
@@ -126,14 +150,7 @@ pub fn fit_popover(app: &AppHandle, height: f64) {
         return;
     }
 
-    let monitor = anchor
-        .and_then(|(x, y, w, h)| {
-            app.monitor_from_point(x + w / 2.0, y + h / 2.0)
-                .ok()
-                .flatten()
-        })
-        .or_else(|| app.primary_monitor().ok().flatten());
-    if let Some(monitor) = monitor {
+    if let Some(monitor) = tray_monitor(app, anchor) {
         let area = monitor.work_area();
         let work = (
             area.position.x,
@@ -142,6 +159,8 @@ pub fn fit_popover(app: &AppHandle, height: f64) {
             area.size.height as i32,
         );
         let (x, y, w, h) = place(anchor, work, monitor.scale_factor(), POPOVER_WIDTH, height);
+        // 先に移す。拡大率の違うディスプレイへ移ると Windows が大きさを変えるので、そのあとで大きさを決める
+        let _ = win.set_position(PhysicalPosition::new(x, y));
         let _ = win.set_size(PhysicalSize::new(w, h));
         let _ = win.set_position(PhysicalPosition::new(x, y));
     } else {
@@ -151,6 +170,24 @@ pub fn fit_popover(app: &AppHandle, height: f64) {
         let _ = win.show();
         let _ = win.set_focus();
     }
+}
+
+/// トレイアイコンのあるディスプレイ。
+///
+/// アイコンの位置がわからなければ、カーソルの位置で代える。メニューを選んだ直後なら、カーソルはトレイの近くにある。
+/// 主ディスプレイにタスクバーがあるとは限らないので、主ディスプレイは最後の手段にする。
+fn tray_monitor(app: &AppHandle, anchor: Option<(f64, f64, f64, f64)>) -> Option<Monitor> {
+    anchor
+        .and_then(|(x, y, w, h)| {
+            app.monitor_from_point(x + w / 2.0, y + h / 2.0)
+                .ok()
+                .flatten()
+        })
+        .or_else(|| {
+            let cursor = app.cursor_position().ok()?;
+            app.monitor_from_point(cursor.x, cursor.y).ok().flatten()
+        })
+        .or_else(|| app.primary_monitor().ok().flatten())
 }
 
 /// ポップアップの位置と大きさ（物理ピクセル）。タスクバーの向きに合わせてアイコンの隣に出す。
