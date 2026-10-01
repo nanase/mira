@@ -22,6 +22,15 @@ pub fn tray_id(profile_id: &str) -> String {
     format!("mira-{profile_id}")
 }
 
+/// 作ったトレイアイコンのうち、位置を取れた最初のもの。
+pub fn first_rect(app: &AppHandle) -> Option<tauri::Rect> {
+    // 位置の取得はメインスレッドで行われる。そこでこのロックを待つと固まるので、写してから離す
+    let ids = app.state::<TrayIds>();
+    let ids = ids.0.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    ids.iter()
+        .find_map(|id| app.tray_by_id(id.as_str())?.rect().ok().flatten())
+}
+
 struct TrayContent {
     id: String,
     profile_id: Option<String>,

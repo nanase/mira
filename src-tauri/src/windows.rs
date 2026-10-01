@@ -5,7 +5,7 @@ use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 use tauri::{
     AppHandle, Emitter, LogicalSize, Manager, Monitor, PhysicalPosition, PhysicalSize, WebviewUrl,
-    WebviewWindowBuilder, WindowEvent,
+    WebviewWindow, WebviewWindowBuilder, WindowEvent,
 };
 
 pub const POPOVER: &str = "popover";
@@ -109,15 +109,40 @@ fn center_settings_on_tray(app: &AppHandle, profile_id: &str) {
         return;
     }
     let anchor = tray_rect(app, profile_id).map(to_anchor);
-    let (Some(monitor), Ok(size)) = (tray_monitor(app, anchor), win.outer_size()) else {
+    if let Some(monitor) = tray_monitor(app, anchor) {
+        center_on(&win, &monitor);
+    }
+}
+
+/// ウィンドウをディスプレイの作業領域の中央に置く。
+///
+/// 先に作業領域の左上へ移してから大きさを測る。拡大率の違うディスプレイへ移ると、Windows が大きさを変えるため
+fn center_on(win: &WebviewWindow, monitor: &Monitor) {
+    let area = monitor.work_area();
+    let _ = win.set_position(area.position);
+    let Ok(size) = win.outer_size() else {
         return;
     };
-    let area = monitor.work_area();
     let center = |start: i32, len: u32, win: u32| start + (len as i32 - win as i32).max(0) / 2;
     let _ = win.set_position(PhysicalPosition::new(
         center(area.position.x, area.size.width, size.width),
         center(area.position.y, area.size.height, size.height),
     ));
+}
+
+/// 設定画面を出すディスプレイ。ポップアップが出ていればその画面、なければトレイアイコンのある画面にする。
+fn settings_monitor(app: &AppHandle) -> Option<Monitor> {
+    let popover = app.get_webview_window(POPOVER);
+    if let Some(win) = popover.filter(|w| w.is_visible().unwrap_or(false)) {
+        if let Ok(Some(monitor)) = win.current_monitor() {
+            return Some(monitor);
+        }
+    }
+    let profile_id = app.state::<Popover>().lock().profile_id.clone();
+    let rect = profile_id
+        .and_then(|id| tray_rect(app, &id))
+        .or_else(|| crate::tray::first_rect(app));
+    tray_monitor(app, rect.map(to_anchor))
 }
 
 /// トレイアイコンの今の位置。隠れているアイコンの一覧が閉じていると取れない。
@@ -307,6 +332,12 @@ pub fn apply_theme(app: &AppHandle) {
 }
 
 pub fn open_settings(app: &AppHandle) {
+    // ポップアップを隠す前に決める
+    let monitor = app
+        .get_webview_window(SETTINGS)
+        .is_none()
+        .then(|| settings_monitor(app))
+        .flatten();
     if !app.state::<Popover>().lock().pinned {
         if let Some(win) = app.get_webview_window(POPOVER) {
             let _ = win.hide();
@@ -333,10 +364,20 @@ pub fn open_settings(app: &AppHandle) {
                 .inner_size(760.0, 640.0)
                 .min_inner_size(640.0, 480.0)
                 .theme(theme)
-                .center()
+                .visible(false)
                 .build();
-        if let Err(err) = result {
-            eprintln!("設定画面を開けませんでした: {err}");
+        match result {
+            Ok(win) => {
+                match &monitor {
+                    Some(monitor) => center_on(&win, monitor),
+                    None => {
+                        let _ = win.center();
+                    }
+                }
+                let _ = win.show();
+                let _ = win.set_focus();
+            }
+            Err(err) => eprintln!("設定画面を開けませんでした: {err}"),
         }
     });
 }
