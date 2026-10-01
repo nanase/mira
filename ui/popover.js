@@ -43,11 +43,9 @@ function renderHeader(profile) {
   set("refresh", ICONS.refresh, t("refresh"));
   set("settings", ICONS.gear, t("settings"), 1.5);
 
-  // 固定中はヘッダーをつかんで動かせる
-  for (const id of ["header", "header-text"]) {
-    if (pinned) $(id).setAttribute("data-tauri-drag-region", "");
-    else $(id).removeAttribute("data-tauri-drag-region");
-  }
+  // 固定中はボタン以外のどこをつかんでも動かせる。"deep" は子要素も含め、ボタンなどは除く
+  if (pinned) $("popover").setAttribute("data-tauri-drag-region", "deep");
+  else $("popover").removeAttribute("data-tauri-drag-region");
 }
 
 function renderMenu() {
