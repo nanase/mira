@@ -117,7 +117,7 @@ impl AppState {
 // ---- 画面に渡すビュー ----
 
 /// リリース日。バージョンを上げるときに一緒に更新する（docs/building.md を参照）。
-pub const RELEASE_DATE: &str = "2026-09-30";
+pub const RELEASE_DATE: &str = "2026-10-01";
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
