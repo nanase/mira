@@ -24,6 +24,8 @@ pub struct PopoverState {
     pub pinned: bool,
     hidden_at: Option<Instant>,
     pending_show: bool,
+    /// 固定中でも、次の表示でトレイアイコンの隣へ置き直す
+    reposition: bool,
 }
 
 #[derive(Default)]
@@ -88,7 +90,34 @@ pub fn toggle_popover(app: &AppHandle, profile_id: &str, rect: Option<tauri::Rec
             return;
         }
     }
-    open_popover(app, profile_id, rect);
+    open_popover(app, profile_id, rect, false);
+}
+
+/// ポップアップをトレイアイコンの隣へ戻して表示する。固定は解かない。
+/// 設定画面が開いていれば、トレイアイコンのあるディスプレイの中央へ移す。
+pub fn reset_popover_position(app: &AppHandle, profile_id: &str) {
+    center_settings_on_tray(app, profile_id);
+    open_popover(app, profile_id, None, true);
+}
+
+/// 最小化中は動かさない。元に戻すとフォーカスが移り、固定していないポップアップが隠れるため
+fn center_settings_on_tray(app: &AppHandle, profile_id: &str) {
+    let Some(win) = app.get_webview_window(SETTINGS) else {
+        return;
+    };
+    if win.is_minimized().unwrap_or(false) {
+        return;
+    }
+    let anchor = tray_rect(app, profile_id).map(to_anchor);
+    let (Some(monitor), Ok(size)) = (tray_monitor(app, anchor), win.outer_size()) else {
+        return;
+    };
+    let area = monitor.work_area();
+    let center = |start: i32, len: u32, win: u32| start + (len as i32 - win as i32).max(0) / 2;
+    let _ = win.set_position(PhysicalPosition::new(
+        center(area.position.x, area.size.width, size.width),
+        center(area.position.y, area.size.height, size.height),
+    ));
 }
 
 /// トレイアイコンの今の位置。隠れているアイコンの一覧が閉じていると取れない。
@@ -103,7 +132,7 @@ fn to_anchor(rect: tauri::Rect) -> (f64, f64, f64, f64) {
     (pos.x, pos.y, size.width, size.height)
 }
 
-fn open_popover(app: &AppHandle, profile_id: &str, rect: Option<tauri::Rect>) {
+fn open_popover(app: &AppHandle, profile_id: &str, rect: Option<tauri::Rect>, reposition: bool) {
     let Some(win) = app.get_webview_window(POPOVER) else {
         return;
     };
@@ -116,6 +145,7 @@ fn open_popover(app: &AppHandle, profile_id: &str, rect: Option<tauri::Rect>) {
         p.profile_id = Some(profile_id.to_owned());
         p.anchor = anchor;
         p.pending_show = !visible;
+        p.reposition |= reposition;
     }
     app.state::<AppState>().request_refresh(RefreshKind::Soft);
     let _ = win.emit("popover-open", profile_id);
@@ -124,7 +154,11 @@ fn open_popover(app: &AppHandle, profile_id: &str, rect: Option<tauri::Rect>) {
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(Duration::from_millis(800)).await;
-        let pending = handle.state::<Popover>().lock().pending_show;
+        let pending = {
+            let popover = handle.state::<Popover>();
+            let p = popover.lock();
+            p.pending_show || p.reposition
+        };
         if pending {
             fit_popover(&handle, 560.0);
         }
@@ -138,14 +172,15 @@ pub fn fit_popover(app: &AppHandle, height: f64) {
     };
     let visible = win.is_visible().unwrap_or(false);
     // 状態を写し取ってからロックを離し、そのあとでウィンドウを操作する
-    let (pinned, anchor, show) = {
+    let (pinned, anchor, show, reposition) = {
         let popover = app.state::<Popover>();
         let mut p = popover.lock();
         let show = std::mem::take(&mut p.pending_show);
-        (p.pinned, p.anchor, show)
+        let reposition = std::mem::take(&mut p.reposition);
+        (p.pinned, p.anchor, show, reposition)
     };
 
-    if pinned && visible {
+    if pinned && visible && !reposition {
         let _ = win.set_size(LogicalSize::new(POPOVER_WIDTH, height));
         return;
     }

@@ -22,6 +22,7 @@ impl Lang {
 pub struct Texts {
     pub open: &'static str,
     pub refresh: &'static str,
+    pub reset_position: &'static str,
     pub settings: &'static str,
     pub quit: &'static str,
     pub session: &'static str,
@@ -38,6 +39,7 @@ pub fn texts(lang: Lang) -> &'static Texts {
         Lang::Ja => &Texts {
             open: "開く",
             refresh: "今すぐ更新",
+            reset_position: "表示位置の復元",
             settings: "設定",
             quit: "Mira を終了",
             session: "セッション",
@@ -51,6 +53,7 @@ pub fn texts(lang: Lang) -> &'static Texts {
         Lang::En => &Texts {
             open: "Open",
             refresh: "Refresh now",
+            reset_position: "Reset position",
             settings: "Settings",
             quit: "Quit Mira",
             session: "Session",

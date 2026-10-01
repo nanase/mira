@@ -188,7 +188,11 @@ fn create(
     let menu = if content.profile_id.is_some() {
         let open = item("open", t.open)?;
         let refresh = item("refresh", t.refresh)?;
-        Menu::with_items(app, &[&open, &refresh, &settings, &separator, &quit])?
+        let reset = item("reset-position", t.reset_position)?;
+        Menu::with_items(
+            app,
+            &[&open, &refresh, &reset, &settings, &separator, &quit],
+        )?
     } else {
         Menu::with_items(app, &[&settings, &separator, &quit])?
     };
@@ -215,6 +219,11 @@ fn create(
                     }
                 }
                 "refresh" => app.state::<AppState>().request_refresh(RefreshKind::Force),
+                "reset-position" => {
+                    if let Some(pid) = &menu_profile_id {
+                        windows::reset_popover_position(app, pid);
+                    }
+                }
                 "settings" => windows::open_settings(app),
                 "quit" => app.exit(0),
                 _ => {}
