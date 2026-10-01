@@ -65,4 +65,19 @@ cargo tauri build
    - `src-tauri/tauri.conf.json` の `version`
 2. リリース日を更新します
    - `src-tauri/src/state.rs` の `RELEASE_DATE`（設定画面のサイドバーに出ます）
-3. テストを通してから、Release ビルドを作ります
+3. テストを通してから、配布用の Release ビルドを作ります
+4. `mira.exe` だけを zip にまとめ、GitHub の Releases に載せます
+
+配布用のビルドでは、上の「ビルド」の手順に 2 つ加えます。
+
+- `--features tauri/custom-protocol` を付けます
+  - 付けないと Tauri が開発モードでビルドされ、`src-tauri` のフルパスが exe に入ります
+- `--remap-path-prefix` で、exe に入るソースのパスを置き換えます
+  - 置き換えないと、ユーザー名を含むパスがパニック時のメッセージ用に残ります
+
+```powershell
+cd src-tauri
+$env:RUSTFLAGS = "--remap-path-prefix=$env:USERPROFILE\.cargo=/cargo --remap-path-prefix=$env:USERPROFILE\.rustup=/rustup --remap-path-prefix=$((Resolve-Path ..).Path)=/mira"
+cargo build --release --locked --features tauri/custom-protocol
+Remove-Item Env:RUSTFLAGS
+```
