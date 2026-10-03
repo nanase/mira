@@ -2,6 +2,9 @@
 //! 実際のピクセル数に合わせて拡大縮小して描く。
 
 pub use crate::config::IconStyle;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use tiny_skia::{Color, FillRule, LineCap, Paint, PathBuilder, Pixmap, Stroke, Transform};
 
 #[derive(Clone, Copy)]
@@ -101,36 +104,93 @@ pub struct IconSpec {
     pub number: Option<u32>,
 }
 
+/// 文字を描くフォント。前にあるものから順に、最初に読めた 1 つを使う。
+const LATIN_FONTS: &[&str] = &["segoeuib.ttf", "arialbd.ttf"];
+const CJK_FONTS: &[&str] = &["YuGothB.ttc", "meiryob.ttc", "msgothic.ttc"];
+
+/// 1 文字の字形。座標はフォントの単位のままで、y は上向き。
+#[derive(Clone)]
+struct Glyph {
+    /// 空白など、形のない文字では None
+    outline: Option<tiny_skia::Path>,
+    advance: f32,
+    units_per_em: f32,
+}
+
+/// Windows に入っている太字フォントから、描く文字の字形だけを取り出して覚えておく。
+///
+/// フォントを丸ごと展開すると、日本語のフォントでは 200 MB を超える。
+/// 描くのは数字とプロファイル名の頭文字くらいなので、初めて描く文字のときだけファイルを読み、読んだら捨てる。
 pub struct Fonts {
-    latin: Option<fontdue::Font>,
-    cjk: Option<fontdue::Font>,
+    dir: PathBuf,
+    /// 見つからなかった文字も None として覚え、ファイルを読み直さない
+    glyphs: Mutex<HashMap<char, Option<Glyph>>>,
 }
 
 impl Fonts {
-    /// Windows に入っている太字フォントを使う。見つからなければ文字は描かない。
     pub fn load() -> Fonts {
-        let dir = std::path::PathBuf::from(
-            std::env::var("WINDIR").unwrap_or_else(|_| r"C:\Windows".into()),
-        )
-        .join("Fonts");
-        let load = |names: &[&str]| {
-            names.iter().find_map(|name| {
-                let bytes = std::fs::read(dir.join(name)).ok()?;
-                fontdue::Font::from_bytes(bytes, fontdue::FontSettings::default()).ok()
-            })
+        let dir = PathBuf::from(std::env::var("WINDIR").unwrap_or_else(|_| r"C:\Windows".into()))
+            .join("Fonts");
+        let fonts = Fonts {
+            dir,
+            glyphs: Mutex::new(HashMap::new()),
         };
-        Fonts {
-            latin: load(&["segoeuib.ttf", "arialbd.ttf"]),
-            cjk: load(&["YuGothB.ttc", "meiryob.ttc", "msgothic.ttc"]),
+        // 数字のスタイルで使う文字は、起動時にまとめて取り出す
+        for c in "0123456789–".chars() {
+            fonts.glyph(c);
         }
+        fonts
     }
 
-    fn for_char(&self, c: char) -> Option<&fontdue::Font> {
-        let has = |f: &&fontdue::Font| f.lookup_glyph_index(c) != 0;
-        self.latin
-            .as_ref()
-            .filter(has)
-            .or(self.cjk.as_ref().filter(has))
+    fn glyph(&self, c: char) -> Option<Glyph> {
+        let mut glyphs = self.glyphs.lock().unwrap_or_else(|e| e.into_inner());
+        glyphs
+            .entry(c)
+            .or_insert_with(|| {
+                find_glyph(&self.dir, LATIN_FONTS, c)
+                    .or_else(|| find_glyph(&self.dir, CJK_FONTS, c))
+            })
+            .clone()
+    }
+}
+
+fn find_glyph(dir: &Path, names: &[&str], c: char) -> Option<Glyph> {
+    for name in names {
+        let Ok(data) = std::fs::read(dir.join(name)) else {
+            continue;
+        };
+        let Ok(face) = ttf_parser::Face::parse(&data, 0) else {
+            continue;
+        };
+        let id = face.glyph_index(c)?;
+        let mut outline = Outline(PathBuilder::new());
+        face.outline_glyph(id, &mut outline);
+        return Some(Glyph {
+            outline: outline.0.finish(),
+            advance: face.glyph_hor_advance(id).unwrap_or(0) as f32,
+            units_per_em: face.units_per_em() as f32,
+        });
+    }
+    None
+}
+
+struct Outline(PathBuilder);
+
+impl ttf_parser::OutlineBuilder for Outline {
+    fn move_to(&mut self, x: f32, y: f32) {
+        self.0.move_to(x, y);
+    }
+    fn line_to(&mut self, x: f32, y: f32) {
+        self.0.line_to(x, y);
+    }
+    fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
+        self.0.quad_to(x1, y1, x, y);
+    }
+    fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
+        self.0.cubic_to(x1, y1, x2, y2, x, y);
+    }
+    fn close(&mut self) {
+        self.0.close();
     }
 }
 
@@ -387,65 +447,40 @@ fn bar(pixmap: &mut Pixmap, s: f32, x: f32, track: Rgba, value: Option<(f64, Rgb
 
 /// 文字列の外接矩形の中心が (cx, cy) に来るように描く。
 fn text(pixmap: &mut Pixmap, fonts: &Fonts, s: &str, px: f32, cx: f32, cy: f32, color: Rgba) {
-    let mut glyphs = Vec::new();
+    // ベースラインを y = 0、y を下向きにした px 単位の輪郭に並べる
+    let mut paths = Vec::new();
     let mut pen = 0.0f32;
-    for c in s.chars() {
-        let Some(font) = fonts.for_char(c) else {
-            continue;
-        };
-        let (metrics, bitmap) = font.rasterize(c, px);
-        glyphs.push((pen.round() as i32 + metrics.xmin, metrics, bitmap));
-        pen += metrics.advance_width;
-    }
-    if glyphs.is_empty() {
-        return;
-    }
-    // ベースラインを y = 0 とした外接矩形
-    let left = glyphs.iter().map(|(x, _, _)| *x).min().unwrap_or(0);
-    let right = glyphs
-        .iter()
-        .map(|(x, m, _)| x + m.width as i32)
-        .max()
-        .unwrap_or(0);
-    let top = glyphs
-        .iter()
-        .map(|(_, m, _)| -(m.ymin + m.height as i32))
-        .min()
-        .unwrap_or(0);
-    let bottom = glyphs.iter().map(|(_, m, _)| -m.ymin).max().unwrap_or(0);
-    let ox = (cx - (left + right) as f32 / 2.0).round() as i32;
-    let oy = (cy - (top + bottom) as f32 / 2.0).round() as i32;
-
-    let (w, h) = (pixmap.width() as i32, pixmap.height() as i32);
-    let pixels = pixmap.pixels_mut();
-    for (gx, m, bitmap) in &glyphs {
-        let gy = -(m.ymin + m.height as i32);
-        for row in 0..m.height as i32 {
-            for col in 0..m.width as i32 {
-                let (x, y) = (ox + gx + col, oy + gy + row);
-                if x < 0 || y < 0 || x >= w || y >= h {
-                    continue;
-                }
-                let coverage = bitmap[(row * m.width as i32 + col) as usize] as f32 / 255.0;
-                let a = coverage * color.3 as f32 / 255.0;
-                if a <= 0.0 {
-                    continue;
-                }
-                let dst = pixels[(y * w + x) as usize];
-                let blend = |src: u8, d: u8| {
-                    (src as f32 * a + d as f32 * (1.0 - a)).round().min(255.0) as u8
-                };
-                let out_a = (a * 255.0 + dst.alpha() as f32 * (1.0 - a))
-                    .round()
-                    .min(255.0) as u8;
-                let r = blend(color.0, dst.red()).min(out_a);
-                let g = blend(color.1, dst.green()).min(out_a);
-                let b = blend(color.2, dst.blue()).min(out_a);
-                if let Some(p) = tiny_skia::PremultipliedColorU8::from_rgba(r, g, b, out_a) {
-                    pixels[(y * w + x) as usize] = p;
-                }
-            }
+    for glyph in s.chars().filter_map(|c| fonts.glyph(c)) {
+        let scale = px / glyph.units_per_em;
+        if let Some(path) = glyph
+            .outline
+            .and_then(|p| p.transform(Transform::from_row(scale, 0.0, 0.0, -scale, pen, 0.0)))
+        {
+            paths.push(path);
         }
+        pen += glyph.advance * scale;
+    }
+    let Some(bounds) = paths.iter().map(|p| p.bounds()).reduce(|a, b| {
+        tiny_skia::Rect::from_ltrb(
+            a.left().min(b.left()),
+            a.top().min(b.top()),
+            a.right().max(b.right()),
+            a.bottom().max(b.bottom()),
+        )
+        .unwrap_or(a)
+    }) else {
+        return;
+    };
+    let ox = (cx - (bounds.left() + bounds.right()) / 2.0).round();
+    let oy = (cy - (bounds.top() + bounds.bottom()) / 2.0).round();
+    for path in &paths {
+        pixmap.fill_path(
+            path,
+            &paint(color),
+            FillRule::Winding,
+            Transform::from_translate(ox, oy),
+            None,
+        );
     }
 }
 
