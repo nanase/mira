@@ -74,6 +74,7 @@ pub fn run() {
             windows::setup_popover(handle);
             windows::apply_theme(handle);
             tray::sync(handle);
+            windows::restore_popover(handle);
             if app.state::<AppState>().queue_consents() {
                 windows::open_consent(handle);
             }

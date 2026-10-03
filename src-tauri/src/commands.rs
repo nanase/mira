@@ -44,8 +44,9 @@ pub fn popover_info(popover: State<'_, Popover>) -> PopoverInfo {
 }
 
 #[tauri::command]
-pub fn select_popover_profile(popover: State<'_, Popover>, id: String) {
+pub fn select_popover_profile(app: AppHandle, popover: State<'_, Popover>, id: String) {
     popover.lock().profile_id = Some(id);
+    windows::save_pinned(&app);
 }
 
 #[tauri::command]
@@ -108,6 +109,7 @@ pub fn update_settings(
         state.save(&inner);
     }
     windows::apply_theme(&app);
+    windows::apply_on_top(&app);
     // 更新間隔が変わったかもしれないので、ループに見直させる
     state.notify.notify_one();
     changed(&app);

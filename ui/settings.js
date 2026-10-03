@@ -172,6 +172,7 @@ function general() {
         ),
       ),
       row(t("autostart"), t("autostartDesc"), toggle(s.autostart, (v) => save({ autostart: v }), t("autostart"))),
+      row(t("pinnedOnTop"), t("pinnedOnTopDesc"), toggle(s.pinnedOnTop, (v) => save({ pinnedOnTop: v }), t("pinnedOnTop"))),
     ),
   ];
 }

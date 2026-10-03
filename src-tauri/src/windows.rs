@@ -28,6 +28,10 @@ pub struct PopoverState {
     pending_show: bool,
     /// 固定中でも、次の表示でトレイアイコンの隣へ置き直す
     reposition: bool,
+    /// 次の表示で、前回の起動で固定していた位置に出す
+    restore: Option<PhysicalPosition<i32>>,
+    /// 固定中に動かした回数。動かし終えてから位置を保存するのに使う
+    moves: u64,
 }
 
 #[derive(Default)]
@@ -69,6 +73,9 @@ pub fn setup_popover(app: &AppHandle) {
     disable_browser_keys(&win);
     let handle = app.clone();
     win.on_window_event(move |event| {
+        if let WindowEvent::Moved(_) = event {
+            save_pinned_after_move(&handle);
+        }
         if let WindowEvent::Focused(false) = event {
             // ロックはウィンドウを操作する前に離す。操作中に届くイベントの処理が同じロックを待つと固まる
             let hide = {
@@ -100,6 +107,13 @@ pub fn toggle_popover(app: &AppHandle, profile_id: &str, rect: Option<tauri::Rec
         let popover = app.state::<Popover>();
         let mut p = popover.lock();
         let same = p.profile_id.as_deref() == Some(profile_id);
+        // 固定中は、ほかのウィンドウの後ろに回っていることがあるので前に出す
+        if visible && p.pinned {
+            drop(p);
+            let _ = win.set_focus();
+            open_popover(app, profile_id, rect, false);
+            return;
+        }
         if visible && same && !p.pinned {
             p.hidden_at = Some(Instant::now());
             drop(p);
@@ -222,13 +236,23 @@ pub fn fit_popover(app: &AppHandle, height: f64) {
     };
     let visible = win.is_visible().unwrap_or(false);
     // 状態を写し取ってからロックを離し、そのあとでウィンドウを操作する
-    let (pinned, anchor, show, reposition) = {
+    let (pinned, anchor, show, reposition, restore) = {
         let popover = app.state::<Popover>();
         let mut p = popover.lock();
         let show = std::mem::take(&mut p.pending_show);
         let reposition = std::mem::take(&mut p.reposition);
-        (p.pinned, p.anchor, show, reposition)
+        let restore = if show { p.restore.take() } else { None };
+        (p.pinned, p.anchor, show, reposition, restore)
     };
+
+    if let Some(pos) = restore {
+        // 起動したところなので、ほかのアプリからフォーカスを奪わない
+        let _ = win.set_position(pos);
+        let _ = win.set_size(LogicalSize::new(POPOVER_WIDTH, height));
+        let _ = win.set_position(pos);
+        let _ = win.show();
+        return;
+    }
 
     if pinned && visible && !reposition {
         let _ = win.set_size(LogicalSize::new(POPOVER_WIDTH, height));
@@ -323,6 +347,8 @@ pub fn place(
 
 pub fn set_pinned(app: &AppHandle, pinned: bool) {
     app.state::<Popover>().lock().pinned = pinned;
+    apply_on_top(app);
+    save_pinned(app);
     let _ = app.emit_to(POPOVER, "popover-pinned", pinned);
 }
 
@@ -333,9 +359,101 @@ pub fn hide_popover(app: &AppHandle) {
         p.pinned = false;
         p.hidden_at = Some(Instant::now());
     }
+    apply_on_top(app);
+    save_pinned(app);
     if let Some(win) = app.get_webview_window(POPOVER) {
         let _ = win.hide();
     }
+}
+
+/// トレイから開いたポップアップはつねに最前面に出す。固定したものは設定に従う。
+pub fn apply_on_top(app: &AppHandle) {
+    let pinned = app.state::<Popover>().lock().pinned;
+    let on_top = !pinned || app.state::<AppState>().lock().config.settings.pinned_on_top;
+    if let Some(win) = app.get_webview_window(POPOVER) {
+        let _ = win.set_always_on_top(on_top);
+    }
+}
+
+/// 固定の状態と位置を設定ファイルに書く。固定していなければ消す。
+pub fn save_pinned(app: &AppHandle) {
+    let (pinned, profile_id) = {
+        let popover = app.state::<Popover>();
+        let p = popover.lock();
+        (p.pinned, p.profile_id.clone())
+    };
+    let position = app
+        .get_webview_window(POPOVER)
+        .and_then(|win| win.outer_position().ok());
+    let saved = match (pinned, profile_id, position) {
+        (true, Some(profile_id), Some(pos)) => Some(crate::config::PinnedPopover {
+            profile_id,
+            x: pos.x,
+            y: pos.y,
+        }),
+        _ => None,
+    };
+    let state = app.state::<AppState>();
+    let mut inner = state.lock();
+    if inner.config.pinned_popover != saved {
+        inner.config.pinned_popover = saved;
+        state.save(&inner);
+    }
+}
+
+/// 固定中に動かしたら、止まってから位置を保存する。ドラッグ中は何度も届くので、そのたびには書かない。
+fn save_pinned_after_move(app: &AppHandle) {
+    let seq = {
+        let popover = app.state::<Popover>();
+        let mut p = popover.lock();
+        if !p.pinned {
+            return;
+        }
+        p.moves += 1;
+        p.moves
+    };
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        if handle.state::<Popover>().lock().moves == seq {
+            save_pinned(&handle);
+        }
+    });
+}
+
+/// 前回の起動で固定していたポップアップを、同じ場所に固定して出す。
+///
+/// プロファイルが外されていたり、その位置がどのディスプレイにも入らなくなっていたりしたら出さない。
+pub fn restore_popover(app: &AppHandle) {
+    let saved = {
+        let state = app.state::<AppState>();
+        let inner = state.lock();
+        inner
+            .config
+            .pinned_popover
+            .clone()
+            .filter(|s| inner.config.profile(&s.profile_id).is_some())
+    };
+    let Some(saved) = saved else {
+        return;
+    };
+    // ヘッダーの左寄りが画面に入っていれば、つかんで動かせる
+    let visible = app
+        .monitor_from_point(saved.x as f64 + 40.0, saved.y as f64 + 20.0)
+        .ok()
+        .flatten()
+        .is_some();
+    if !visible {
+        return;
+    }
+    {
+        let popover = app.state::<Popover>();
+        let mut p = popover.lock();
+        p.pinned = true;
+        p.restore = Some(PhysicalPosition::new(saved.x, saved.y));
+    }
+    apply_on_top(app);
+    open_popover(app, &saved.profile_id, None, false);
 }
 
 /// 設定のテーマをタイトルバーに反映する。None は Windows の設定に従う。

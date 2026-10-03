@@ -50,6 +50,8 @@ pub struct Settings {
     pub autostart: bool,
     /// 使用率を履歴に記録するか
     pub record_history: bool,
+    /// 固定したポップアップを最前面に出すか
+    pub pinned_on_top: bool,
 }
 
 impl Default for Settings {
@@ -64,6 +66,7 @@ impl Default for Settings {
             theme: Theme::System,
             autostart: false,
             record_history: true,
+            pinned_on_top: true,
         }
     }
 }
@@ -95,6 +98,16 @@ pub struct Profile {
     pub allow_token_refresh: Option<bool>,
 }
 
+/// 固定したポップアップ。次の起動で同じ場所に出す。
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PinnedPopover {
+    pub profile_id: String,
+    /// ウィンドウの左上（物理ピクセル）
+    pub x: i32,
+    pub y: i32,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Config {
@@ -102,6 +115,8 @@ pub struct Config {
     pub profiles: Vec<Profile>,
     /// 登録を断られたディレクトリ。自動検出で二度と尋ねない。
     pub declined_dirs: Vec<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pinned_popover: Option<PinnedPopover>,
 }
 
 impl Config {
