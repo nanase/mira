@@ -338,6 +338,11 @@ export const ICONS = {
   check: "M5 12l5 5L20 7",
 };
 
+// WebView2 の右クリックメニュー（再読み込み、印刷など）を出さない。文字の入力欄では編集用のメニューを残す
+document.addEventListener("contextmenu", (e) => {
+  if (!e.target.closest?.('input[type="text"], textarea')) e.preventDefault();
+});
+
 export const tauri = window.__TAURI__;
 export const invoke = (cmd, args) => tauri.core.invoke(cmd, args);
 export const listen = (event, fn) => tauri.event.listen(event, fn);
