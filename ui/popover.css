@@ -13,26 +13,37 @@ body {
   border: 1px solid var(--stroke);
   border-radius: 8px;
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
-  padding-bottom: 12px;
+  padding-bottom: 6px;
 }
 
+.popover.compact {
+  padding-bottom: 8px;
+}
+
+/* 上部は 1 行。高さやアイコンの大きさは Wezen にそろえている */
 .header {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 12px 10px 10px 16px;
+  gap: 2px;
+  height: 32px;
+  padding: 0 4px 0 10px;
 }
 
-.header-text {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  flex-grow: 1;
-  min-width: 0;
+.mark {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.header .icon-button {
+  width: 28px;
+  height: 28px;
 }
 
 .profile-picker {
   position: relative;
+  min-width: 0;
+  margin-left: 6px;
 }
 
 .profile-button {
@@ -41,7 +52,7 @@ body {
   align-items: center;
   gap: 4px;
   max-width: 100%;
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   color: var(--text);
@@ -120,18 +131,21 @@ body {
   white-space: nowrap;
 }
 
+/* 稼働状況は点だけ出し、文言はツールチップに入れる。点が小さいので押せる範囲を広げる */
 .status {
   all: unset;
   display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  color: var(--muted);
+  padding: 6px;
+  border-radius: 4px;
   cursor: pointer;
 }
 
 .status:hover {
-  text-decoration: underline;
+  background: var(--hover);
+}
+
+.status:focus-visible {
+  outline: 2px solid var(--accent);
 }
 
 .status-dot {
@@ -142,17 +156,23 @@ body {
   flex-shrink: 0;
 }
 
+/* 区切り線はコンパクトのときだけ引く。カードは枠で区切られている */
 .divider {
+  display: none;
   height: 1px;
   background: var(--stroke);
-  margin: 0 16px;
+  margin: 0 10px;
+}
+
+.compact .divider {
+  display: block;
 }
 
 .banner {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 10px 12px 0;
+  margin: 0 6px 4px;
   padding: 8px 12px;
   border-radius: 6px;
   font-size: 12px;
@@ -186,10 +206,19 @@ body {
   color: var(--yellow);
 }
 
+.compact .banner {
+  margin: 8px 8px 0;
+}
+
 .cards {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
+  padding: 0 6px;
+}
+
+.compact .cards {
+  gap: 9px;
   padding: 10px 12px 0;
 }
 
@@ -197,7 +226,50 @@ body {
   background: var(--card);
   border: 1px solid var(--stroke);
   border-radius: 6px;
-  padding: 10px 12px;
+  padding: 8px 10px 9px;
+}
+
+/* コンパクト: 枠をなくし、名前・バー・数値を 1 行に並べる。リセットは 2 行目に */
+.compact .card {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) 40px;
+  column-gap: 10px;
+  align-items: center;
+  padding: 0;
+  background: none;
+  border: none;
+}
+
+.compact .card-head {
+  display: contents;
+}
+
+.compact .card-title,
+.compact .percent {
+  font-size: 13px;
+}
+
+.compact .card-title {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.compact .percent {
+  grid-column: 3;
+  grid-row: 1;
+  text-align: right;
+}
+
+.compact .bar {
+  grid-column: 2;
+  grid-row: 1;
+  margin-top: 0;
+}
+
+.compact .card-sub,
+.compact .card-reset {
+  grid-column: 2 / 4;
+  margin-top: 1px;
 }
 
 .card-head {
@@ -209,15 +281,6 @@ body {
 .card-title {
   font-size: 14px;
   font-weight: 600;
-}
-
-.tag {
-  font-size: 10px;
-  font-weight: 500;
-  padding: 1px 7px;
-  border-radius: 999px;
-  background: var(--tag-bg);
-  color: var(--muted);
 }
 
 .grow {
@@ -234,12 +297,13 @@ body {
   font-size: 11px;
   color: var(--muted);
   margin-top: 1px;
+  font-variant-numeric: tabular-nums;
 }
 
 .bar {
   position: relative;
   height: 8px;
-  margin-top: 7px;
+  margin-top: 6px;
 }
 
 .bar-track,
@@ -271,7 +335,8 @@ body {
 .card-reset {
   font-size: 11px;
   color: var(--muted);
-  margin-top: 6px;
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
 }
 
 .balance {
@@ -279,6 +344,10 @@ body {
   align-items: baseline;
   padding: 4px 4px 0;
   font-size: 12px;
+}
+
+.compact .balance {
+  padding: 1px 0 0;
 }
 
 .balance .label {
@@ -293,14 +362,8 @@ body {
 }
 
 .message {
-  padding: 16px 4px 4px;
+  padding: 8px 6px 4px;
   font-size: 12px;
-  color: var(--muted);
-}
-
-.footer {
-  padding: 10px 16px 0;
-  font-size: 11px;
   color: var(--muted);
 }
 

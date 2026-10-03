@@ -1,4 +1,4 @@
-import { ICONS, applyTheme, h, icon, invoke, listen, money, resetText, setLang, shortTime, t } from "./i18n.js";
+import { ICONS, applyTheme, h, icon, invoke, listen, money, resetShortText, resetText, setLang, shortTime, t } from "./i18n.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -23,24 +23,27 @@ function renderHeader(profile) {
   // プロファイルが 1 つなら選ぶものがないので、矢印を出さずただの見出しにする
   const button = $("profile-button");
   const choosable = state.profiles.length > 1;
-  button.replaceChildren(h("span", {}, profile?.name ?? "Mira"), ...(choosable ? [icon(ICONS.chevron, 14, 2)] : []));
+  button.replaceChildren(h("span", {}, profile?.name ?? "Mira"), ...(choosable ? [icon(ICONS.chevron, 13, 2)] : []));
   button.disabled = !choosable;
   if (choosable) button.setAttribute("aria-label", t("pickProfile"));
   else button.removeAttribute("aria-label");
 
   const [key, color] = state.status ? STATUS[state.status] : ["statusLoading", "var(--muted)"];
-  $("status-text").textContent = t(key);
+  $("status").title = t(key);
+  $("status").setAttribute("aria-label", t(key));
   $("status-dot").style.background = color;
 
   const set = (id, paths, label, width = 1.7) => {
     const el = $(id);
-    el.replaceChildren(icon(paths, 16, width));
+    el.replaceChildren(icon(paths, 15, width));
     el.setAttribute("aria-label", label);
     el.title = label;
   };
   set("pin", ICONS.pin, pinned ? t("unpin") : t("pin"));
   $("pin").setAttribute("aria-pressed", String(pinned));
-  set("refresh", ICONS.refresh, t("refresh"));
+  // 最終更新の時刻は、更新ボタンのツールチップに出す
+  const updated = profile?.lastSuccessMs ? t("lastUpdated", shortTime(profile.lastSuccessMs)) : t("neverUpdated");
+  set("refresh", ICONS.refresh, t("refreshTip", updated));
   set("settings", ICONS.gear, t("settings"), 1.5);
 
   // 固定中はボタン以外のどこをつかんでも動かせる。"deep" は子要素も含め、ボタンなどは除く
@@ -97,17 +100,18 @@ function card(row) {
   const remaining = s.showRemaining;
   const shown = remaining ? Math.max(0, 100 - row.used) : row.used;
 
+  // コンパクトでは見出しの幅が狭いので、追加使用量は縮めて正式な名前をツールチップに入れる
+  const compact = s.popoverLayout === "compact";
   let title;
-  let tag = null;
+  let titleTip = null;
   let sub = null;
   if (row.kind === "session") {
-    title = t("session");
-    sub = t("sessionSub");
+    title = t("sessionShort");
   } else if (row.kind === "weekly") {
-    title = t("allModels");
-    tag = t("weekly");
+    title = t("weekly");
   } else {
-    title = t("extra");
+    title = compact ? t("extraShort") : t("extra");
+    titleTip = compact ? t("extra") : null;
     sub = `${money(row.extraUsed).split(" ")[0]} / ${money(row.extraLimit)}`;
   }
 
@@ -128,15 +132,16 @@ function card(row) {
     h(
       "div",
       { class: "card-head" },
-      h("div", { class: "card-title" }, title),
-      tag && h("span", { class: "tag" }, tag),
+      h("div", { class: "card-title", title: titleTip }, title),
       h("div", { class: "grow" }),
       h("div", { class: `percent level-${row.level}` }, `${Math.round(shown)}%`),
     ),
     sub && h("div", { class: "card-sub" }, sub),
     bar,
     row.kind !== "extra" &&
-      h("div", { class: "card-reset" }, row.resetsAtMs != null ? resetText(row.resetsAtMs, Date.now()) : t("waitingStart")),
+      (row.resetsAtMs != null
+        ? h("div", { class: "card-reset", title: resetText(row.resetsAtMs, Date.now()) }, resetShortText(row.resetsAtMs, Date.now()))
+        : h("div", { class: "card-reset" }, t("waitingStart"))),
   );
 }
 
@@ -144,6 +149,7 @@ function render() {
   if (!state) return;
   setLang(state.lang);
   applyTheme(state.settings.theme);
+  $("popover").classList.toggle("compact", state.settings.popoverLayout === "compact");
   const profile = currentProfile();
   renderHeader(profile);
   if (!$("profile-menu").classList.contains("hidden")) renderMenu();
@@ -162,9 +168,6 @@ function render() {
     cards.push(h("div", { class: "message" }, t("loading")));
   }
   $("cards").replaceChildren(...cards);
-
-  const n = state.settings.refreshMinutes;
-  $("footer").textContent = profile?.lastSuccessMs ? t("footer", shortTime(profile.lastSuccessMs), n) : t("footerNever", n);
   fit();
 }
 

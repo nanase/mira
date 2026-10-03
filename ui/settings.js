@@ -203,6 +203,15 @@ function appearance() {
         "theme",
       ),
       choice(
+        t("popoverLayout"),
+        [
+          ["cards", t("layoutCards")],
+          ["compact", t("layoutCompact")],
+        ],
+        s.popoverLayout,
+        "popoverLayout",
+      ),
+      choice(
         t("percentMode"),
         [
           [false, t("percentUsed")],

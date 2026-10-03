@@ -30,6 +30,13 @@ pub enum MarkerMode {
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub enum PopoverLayout {
+    Cards,
+    Compact,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub enum Theme {
     System,
     Dark,
@@ -46,6 +53,7 @@ pub struct Settings {
     pub color_mode: ColorMode,
     pub marker_mode: MarkerMode,
     pub show_remaining: bool,
+    pub popover_layout: PopoverLayout,
     pub theme: Theme,
     pub autostart: bool,
     /// 使用率を履歴に記録するか
@@ -63,6 +71,7 @@ impl Default for Settings {
             color_mode: ColorMode::Color,
             marker_mode: MarkerMode::White,
             show_remaining: false,
+            popover_layout: PopoverLayout::Cards,
             theme: Theme::System,
             autostart: false,
             record_history: true,

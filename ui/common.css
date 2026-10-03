@@ -13,7 +13,6 @@
   --muted: #b4b4b4;
   --track: rgba(255, 255, 255, 0.12);
   --marker: #ffffff;
-  --tag-bg: rgba(255, 255, 255, 0.09);
   --hover: rgba(255, 255, 255, 0.07);
   --input: #1f1f1f;
   --button: #373737;
@@ -46,7 +45,6 @@
   --muted: #5c5c5c;
   --track: rgba(0, 0, 0, 0.1);
   --marker: #1a1a1a;
-  --tag-bg: rgba(0, 0, 0, 0.06);
   --hover: rgba(0, 0, 0, 0.05);
   --input: #ffffff;
   --button: #fbfbfb;

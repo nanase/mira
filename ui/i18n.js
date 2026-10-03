@@ -10,15 +10,16 @@ const ja = {
   pickProfile: "表示するプロファイルを選ぶ",
   pin: "ウィンドウとして固定",
   unpin: "固定を解除",
-  refresh: "今すぐ更新",
+  refreshTip: (updated) => `今すぐ更新（${updated}）`,
   settings: "設定",
   session: "セッション",
-  sessionSub: "5 時間ウィンドウ",
-  allModels: "すべてのモデル",
+  sessionShort: "5 時間",
   weekly: "週間",
   extra: "追加使用量",
+  extraShort: "追加",
   balance: "クレジット残高",
   resets: (rel, abs) => `${rel}後にリセット（${abs}）`,
+  resetsShort: (rel, abs) => `あと ${rel} · ${abs}`,
   waitingStart: "開始を待っています",
   days: (d, h) => `${d}日${h}時間`,
   hours: (h, m) => `${h}時間${m}分`,
@@ -26,8 +27,8 @@ const ja = {
   bannerExpired: "認証が切れています。Claude Code で再ログインしてください",
   bannerFailed: (n) => `更新に ${n} 回続けて失敗しました`,
   bannerStale: (n) => `${n} 分前のデータを表示しています`,
-  footer: (time, n) => `最終更新 ${time} · ${n} 分ごとに自動更新`,
-  footerNever: (n) => `まだ取得していません · ${n} 分ごとに自動更新`,
+  lastUpdated: (time) => `最終更新 ${time}`,
+  neverUpdated: "まだ取得していません",
   loading: "使用量を取得しています…",
 
   settingsTitle: "Mira の設定",
@@ -68,6 +69,9 @@ const ja = {
   percentMode: "パーセントの表示",
   percentUsed: "使用済み",
   percentRemaining: "残り",
+  popoverLayout: "スタイル",
+  layoutCards: "カード",
+  layoutCompact: "コンパクト",
   profilesDesc: "Claude Code の設定フォルダごとにプロファイルを作ります。フォルダの中身は許可したトークンの更新以外では変更しません。",
   addFolder: "フォルダを追加",
   rescan: "もう一度検出",
@@ -140,15 +144,16 @@ const en = {
   pickProfile: "Choose a profile to show",
   pin: "Pin as a window",
   unpin: "Unpin",
-  refresh: "Refresh now",
+  refreshTip: (updated) => `Refresh now (${updated})`,
   settings: "Settings",
   session: "Session",
-  sessionSub: "5-hour window",
-  allModels: "All models",
+  sessionShort: "5-hour",
   weekly: "Weekly",
   extra: "Extra usage",
+  extraShort: "Extra",
   balance: "Credit balance",
   resets: (rel, abs) => `Resets in ${rel} (${abs})`,
+  resetsShort: (rel, abs) => `${rel} left · ${abs}`,
   waitingStart: "Waiting to start",
   days: (d, h) => `${d}d ${h}h`,
   hours: (h, m) => `${h}h ${m}m`,
@@ -156,8 +161,8 @@ const en = {
   bannerExpired: "Sign-in expired. Sign in again in Claude Code",
   bannerFailed: (n) => `Update failed ${n} times in a row`,
   bannerStale: (n) => `Showing data from ${n} min ago`,
-  footer: (time, n) => `Updated ${time} · refreshes every ${n} min`,
-  footerNever: (n) => `Not fetched yet · refreshes every ${n} min`,
+  lastUpdated: (time) => `updated ${time}`,
+  neverUpdated: "not fetched yet",
   loading: "Fetching usage…",
 
   settingsTitle: "Mira Settings",
@@ -198,6 +203,9 @@ const en = {
   percentMode: "Show percentage as",
   percentUsed: "Used",
   percentRemaining: "Remaining",
+  popoverLayout: "Style",
+  layoutCards: "Cards",
+  layoutCompact: "Compact",
   profilesDesc: "Each Claude Code config folder becomes a profile. Mira never changes the folder, except for token refresh you allow.",
   addFolder: "Add folder",
   rescan: "Detect again",
@@ -284,14 +292,22 @@ export function shortTime(ms) {
   return d.toDateString() === now.toDateString() ? hm : `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
 }
 
-/** 「2時間10分後にリセット（16:40）」 */
-export function resetText(resetMs, nowMs) {
+function remaining(resetMs, nowMs) {
   const total = Math.max(1, Math.round((resetMs - nowMs) / 60000));
   const d = Math.floor(total / 1440);
   const h = Math.floor((total % 1440) / 60);
   const m = total % 60;
-  const rel = d > 0 ? t("days", d, h) : h > 0 ? t("hours", h, m) : t("minutes", m);
-  return t("resets", rel, shortTime(resetMs));
+  return d > 0 ? t("days", d, h) : h > 0 ? t("hours", h, m) : t("minutes", m);
+}
+
+/** 「2時間10分後にリセット（16:40）」 */
+export function resetText(resetMs, nowMs) {
+  return t("resets", remaining(resetMs, nowMs), shortTime(resetMs));
+}
+
+/** 「あと 2時間10分 · 16:40」 */
+export function resetShortText(resetMs, nowMs) {
+  return t("resetsShort", remaining(resetMs, nowMs), shortTime(resetMs));
 }
 
 export function money(m) {
