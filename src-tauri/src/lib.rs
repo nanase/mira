@@ -102,6 +102,7 @@ pub fn run() {
             commands::consent_refresh,
             commands::fit_consent,
             commands::get_history,
+            commands::clear_history,
             commands::quit,
         ])
         .build(tauri::generate_context!())

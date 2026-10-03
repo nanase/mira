@@ -8,6 +8,7 @@ let section = "general";
 let pendingRender = false;
 let notice = "";
 let confirmRemove = null;
+let confirmClear = false;
 let historyProfile = null;
 let historyDays = 7;
 
@@ -499,8 +500,62 @@ function history() {
     return nodes;
   }
   if (!state.profiles.some((p) => p.id === historyProfile)) historyProfile = state.profiles[0].id;
+  const profile = state.profiles.find((p) => p.id === historyProfile);
+  const clearControl = confirmClear
+    ? h(
+        "div",
+        { class: "confirm" },
+        h("span", {}, t("historyClearConfirm")),
+        h(
+          "button",
+          {
+            type: "button",
+            class: "button small danger",
+            onclick: async () => {
+              confirmClear = false;
+              await invoke("clear_history", { id: historyProfile });
+              render();
+            },
+          },
+          t("historyClearYes"),
+        ),
+        h(
+          "button",
+          {
+            type: "button",
+            class: "button small",
+            onclick: () => {
+              confirmClear = false;
+              render();
+            },
+          },
+          t("no"),
+        ),
+      )
+    : h(
+        "button",
+        {
+          type: "button",
+          class: "button small",
+          onclick: () => {
+            confirmClear = true;
+            render();
+          },
+        },
+        t("historyClear"),
+      );
   const body = h("div", {}, h("div", { class: "empty" }, "…"));
   nodes.push(
+    h(
+      "div",
+      { class: "group" },
+      row(
+        t("historyRecord"),
+        t("historyNote"),
+        toggle(state.settings.recordHistory, (v) => save({ recordHistory: v }), t("historyRecord")),
+      ),
+      row(t("historyClear"), t("historyClearDesc", profile.name), clearControl),
+    ),
     h(
       "div",
       { class: "toolbar" },
@@ -511,6 +566,7 @@ function history() {
             "aria-label": t("historyProfile"),
             onchange: (e) => {
               historyProfile = e.target.value;
+              confirmClear = false;
               render();
             },
           },
@@ -530,7 +586,6 @@ function history() {
         },
         t("range"),
       ),
-      h("span", { class: "info" }, t("historyNote")),
     ),
     body,
   );
@@ -630,6 +685,7 @@ function render() {
               section = key;
               notice = "";
               confirmRemove = null;
+              confirmClear = false;
               render();
             },
           },

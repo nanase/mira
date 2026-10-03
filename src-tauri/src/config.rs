@@ -48,6 +48,8 @@ pub struct Settings {
     pub show_remaining: bool,
     pub theme: Theme,
     pub autostart: bool,
+    /// 使用率を履歴に記録するか
+    pub record_history: bool,
 }
 
 impl Default for Settings {
@@ -61,6 +63,7 @@ impl Default for Settings {
             show_remaining: false,
             theme: Theme::System,
             autostart: false,
+            record_history: true,
         }
     }
 }

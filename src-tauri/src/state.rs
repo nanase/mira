@@ -381,6 +381,7 @@ async fn refresh(state: &AppState) {
 
         let now = Utc::now();
         let mut inner = state.lock();
+        let record = inner.config.settings.record_history;
         let rt = inner.runtime.entry(id.clone()).or_default();
         match result {
             Ok(usage) => {
@@ -400,8 +401,10 @@ async fn refresh(state: &AppState) {
                 rt.failures = 0;
                 rt.auth_error = false;
                 drop(inner);
-                if let Err(err) = state.history.append(&id, &point) {
-                    eprintln!("履歴を書けませんでした: {err}");
+                if record {
+                    if let Err(err) = state.history.append(&id, &point) {
+                        eprintln!("履歴を書けませんでした: {err}");
+                    }
                 }
             }
             Err(Failure::Cred(err)) => {

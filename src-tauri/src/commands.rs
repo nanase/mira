@@ -353,6 +353,11 @@ pub fn get_history(state: State<'_, AppState>, id: String, days: u32) -> Vec<Poi
 }
 
 #[tauri::command]
+pub fn clear_history(state: State<'_, AppState>, id: String) {
+    state.history.remove(&id);
+}
+
+#[tauri::command]
 pub fn quit(app: AppHandle) {
     app.exit(0);
 }
