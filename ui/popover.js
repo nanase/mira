@@ -135,7 +135,8 @@ function card(row) {
     ),
     sub && h("div", { class: "card-sub" }, sub),
     bar,
-    row.resetsAtMs != null && h("div", { class: "card-reset" }, resetText(row.resetsAtMs, Date.now())),
+    row.kind !== "extra" &&
+      h("div", { class: "card-reset" }, row.resetsAtMs != null ? resetText(row.resetsAtMs, Date.now()) : t("waitingStart")),
   );
 }
 
