@@ -7,6 +7,8 @@ use tauri::{
     AppHandle, Emitter, LogicalSize, Manager, Monitor, PhysicalPosition, PhysicalSize, WebviewUrl,
     WebviewWindow, WebviewWindowBuilder, WindowEvent,
 };
+use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Settings3;
+use windows_core::Interface;
 
 pub const POPOVER: &str = "popover";
 pub const SETTINGS: &str = "settings";
@@ -37,11 +39,34 @@ impl Popover {
     }
 }
 
+/// ブラウザとしてのショートカットキー（F5 の再読み込み、Ctrl+P の印刷など）を止める。
+/// コピーや貼り付けなど、文字の編集に使うキーは止まらない。
+fn disable_browser_keys(win: &WebviewWindow) {
+    let result = win.with_webview(|webview| {
+        // SAFETY: WebView2 の COM 呼び出し。with_webview はメインスレッドで呼ぶ
+        let result = unsafe {
+            webview
+                .controller()
+                .CoreWebView2()
+                .and_then(|core| core.Settings())
+                .and_then(|settings| settings.cast::<ICoreWebView2Settings3>())
+                .and_then(|settings| settings.SetAreBrowserAcceleratorKeysEnabled(false))
+        };
+        if let Err(err) = result {
+            eprintln!("ショートカットキーを止められませんでした: {err}");
+        }
+    });
+    if let Err(err) = result {
+        eprintln!("ショートカットキーを止められませんでした: {err}");
+    }
+}
+
 /// ポップアップは起動時に隠して作っておき、フォーカスを失ったら隠す。
 pub fn setup_popover(app: &AppHandle) {
     let Some(win) = app.get_webview_window(POPOVER) else {
         return;
     };
+    disable_browser_keys(&win);
     let handle = app.clone();
     win.on_window_event(move |event| {
         if let WindowEvent::Focused(false) = event {
@@ -368,6 +393,7 @@ pub fn open_settings(app: &AppHandle) {
                 .build();
         match result {
             Ok(win) => {
+                disable_browser_keys(&win);
                 match &monitor {
                     Some(monitor) => center_on(&win, monitor),
                     None => {
@@ -409,8 +435,9 @@ pub fn open_consent(app: &AppHandle) {
                 .theme(theme)
                 .center()
                 .build();
-        if let Err(err) = result {
-            eprintln!("確認ダイアログを開けませんでした: {err}");
+        match result {
+            Ok(win) => disable_browser_keys(&win),
+            Err(err) => eprintln!("確認ダイアログを開けませんでした: {err}"),
         }
     });
 }
