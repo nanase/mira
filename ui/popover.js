@@ -1,4 +1,5 @@
-import { ICONS, applyTheme, h, icon, invoke, listen, money, resetShortText, resetText, setLang, shortTime, t } from "./i18n.js";
+import { ICONS, applyTheme, h, icon, invoke, listen } from "./dom.js";
+import { money, resetShortText, resetText, setLang, shortTime, t } from "./i18n.js";
 
 const $ = (id) => document.getElementById(id);
 

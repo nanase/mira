@@ -1,4 +1,5 @@
-import { applyTheme, h, invoke, listen, setLang, shortTime, t } from "./i18n.js";
+import { applyTheme, h, invoke, listen } from "./dom.js";
+import { setLang, shortTime, t } from "./i18n.js";
 
 const $ = (id) => document.getElementById(id);
 const SVG = "http://www.w3.org/2000/svg";
@@ -60,6 +61,33 @@ function segmented(options, value, onChange, label) {
     options.map(([v, text]) =>
       h("button", { type: "button", role: "radio", "aria-checked": String(v === value), onclick: () => onChange(v) }, text),
     ),
+  );
+}
+
+/** 取り消せない操作のボタン。押すと、その場で「はい / いいえ」を尋ねる。 */
+function confirmable({ asking, label, question, yes, setAsking, onYes }) {
+  const ask = (v) => {
+    setAsking(v);
+    render();
+  };
+  if (!asking) return h("button", { type: "button", class: "button small", onclick: () => ask(true) }, label);
+  return h(
+    "div",
+    { class: "confirm" },
+    h("span", {}, question),
+    h(
+      "button",
+      {
+        type: "button",
+        class: "button small danger",
+        onclick: () => {
+          setAsking(false);
+          onYes();
+        },
+      },
+      yes,
+    ),
+    h("button", { type: "button", class: "button small", onclick: () => ask(false) }, t("no")),
   );
 }
 
@@ -277,49 +305,14 @@ function profileCard(p) {
       if (e.key === "Enter") e.target.blur();
     },
   });
-  const removeControl =
-    confirmRemove === p.id
-      ? h(
-          "div",
-          { class: "confirm" },
-          h("span", {}, t("removeConfirm")),
-          h(
-            "button",
-            {
-              type: "button",
-              class: "button small danger",
-              onclick: async () => {
-                confirmRemove = null;
-                await invoke("remove_profile", { id: p.id });
-              },
-            },
-            t("yes"),
-          ),
-          h(
-            "button",
-            {
-              type: "button",
-              class: "button small",
-              onclick: () => {
-                confirmRemove = null;
-                render();
-              },
-            },
-            t("no"),
-          ),
-        )
-      : h(
-          "button",
-          {
-            type: "button",
-            class: "button small",
-            onclick: () => {
-              confirmRemove = p.id;
-              render();
-            },
-          },
-          t("remove"),
-        );
+  const removeControl = confirmable({
+    asking: confirmRemove === p.id,
+    label: t("remove"),
+    question: t("removeConfirm"),
+    yes: t("yes"),
+    setAsking: (v) => (confirmRemove = v ? p.id : null),
+    onYes: () => invoke("remove_profile", { id: p.id }),
+  });
 
   return h(
     "div",
@@ -511,49 +504,17 @@ function history() {
   }
   if (!state.profiles.some((p) => p.id === historyProfile)) historyProfile = state.profiles[0].id;
   const profile = state.profiles.find((p) => p.id === historyProfile);
-  const clearControl = confirmClear
-    ? h(
-        "div",
-        { class: "confirm" },
-        h("span", {}, t("historyClearConfirm")),
-        h(
-          "button",
-          {
-            type: "button",
-            class: "button small danger",
-            onclick: async () => {
-              confirmClear = false;
-              await invoke("clear_history", { id: historyProfile });
-              render();
-            },
-          },
-          t("historyClearYes"),
-        ),
-        h(
-          "button",
-          {
-            type: "button",
-            class: "button small",
-            onclick: () => {
-              confirmClear = false;
-              render();
-            },
-          },
-          t("no"),
-        ),
-      )
-    : h(
-        "button",
-        {
-          type: "button",
-          class: "button small",
-          onclick: () => {
-            confirmClear = true;
-            render();
-          },
-        },
-        t("historyClear"),
-      );
+  const clearControl = confirmable({
+    asking: confirmClear,
+    label: t("historyClear"),
+    question: t("historyClearConfirm"),
+    yes: t("historyClearYes"),
+    setAsking: (v) => (confirmClear = v),
+    onYes: async () => {
+      await invoke("clear_history", { id: historyProfile });
+      render();
+    },
+  });
   const body = h("div", {}, h("div", { class: "empty" }, "…"));
   nodes.push(
     h(

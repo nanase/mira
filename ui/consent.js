@@ -1,4 +1,5 @@
-import { applyTheme, h, invoke, listen, setLang, t } from "./i18n.js";
+import { applyTheme, h, invoke, listen } from "./dom.js";
+import { setLang, t } from "./i18n.js";
 
 const $ = (id) => document.getElementById(id);
 let view = null;
