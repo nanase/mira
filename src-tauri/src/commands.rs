@@ -156,8 +156,7 @@ pub fn remove_profile(app: AppHandle, state: State<'_, AppState>, id: String) {
     }
     state.history.remove(&id);
     {
-        let popover = app.state::<Popover>();
-        let mut p = popover.lock();
+        let mut p = windows::popover(&app);
         if p.profile_id.as_deref() == Some(id.as_str()) {
             p.profile_id = None;
         }

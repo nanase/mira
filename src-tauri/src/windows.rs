@@ -14,6 +14,15 @@ pub const POPOVER: &str = "popover";
 pub const SETTINGS: &str = "settings";
 pub const CONSENT: &str = "consent";
 
+/// WebView2 の起動引数。すべてのウィンドウで同じにする。違うと、2 つ目のウィンドウを作れない。
+///
+/// - 前半は wry の既定値。引数を指定すると既定値が付かなくなるので、自分で入れる
+/// - `--disable-gpu` で GPU プロセスのメモリが約 70 MB 減る。描くものが軽いので、ソフトウェア描画で足りる
+///
+/// ポップアップは tauri.conf.json で作るので、そちらにも同じ値を書く（テストで照らし合わせている）。
+pub const BROWSER_ARGS: &str =
+    "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-gpu";
+
 /// ポップアップのウィンドウ幅（CSS px）。カード 320px と影の余白 10px ずつ。
 const POPOVER_WIDTH: f64 = 340.0;
 const CONSENT_WIDTH: f64 = 540.0;
@@ -40,6 +49,21 @@ pub struct Popover(pub Mutex<PopoverState>);
 impl Popover {
     pub fn lock(&self) -> MutexGuard<'_, PopoverState> {
         self.0.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+pub fn popover(app: &AppHandle) -> MutexGuard<'_, PopoverState> {
+    app.state::<Popover>().inner().lock()
+}
+
+/// ポップアップを隠し、隠した時刻を覚える。トレイアイコンのクリックでフォーカスが外れて隠れたとき、
+/// 同じクリックで開き直さないために使う。
+///
+/// ロックはウィンドウを操作する前に離す。操作中に届くイベントの処理が同じロックを待つと固まる
+fn hide_window(app: &AppHandle) {
+    popover(app).hidden_at = Some(Instant::now());
+    if let Some(win) = app.get_webview_window(POPOVER) {
+        let _ = win.hide();
     }
 }
 
@@ -77,19 +101,9 @@ pub fn setup_popover(app: &AppHandle) {
             save_pinned_after_move(&handle);
         }
         if let WindowEvent::Focused(false) = event {
-            // ロックはウィンドウを操作する前に離す。操作中に届くイベントの処理が同じロックを待つと固まる
-            let hide = {
-                let popover = handle.state::<Popover>();
-                let mut p = popover.lock();
-                if !p.pinned {
-                    p.hidden_at = Some(Instant::now());
-                }
-                !p.pinned
-            };
-            if hide {
-                if let Some(win) = handle.get_webview_window(POPOVER) {
-                    let _ = win.hide();
-                }
+            let pinned = popover(&handle).pinned;
+            if !pinned {
+                hide_window(&handle);
             }
         }
     });
@@ -103,31 +117,24 @@ pub fn toggle_popover(app: &AppHandle, profile_id: &str, rect: Option<tauri::Rec
         return;
     };
     let visible = win.is_visible().unwrap_or(false);
-    {
-        let popover = app.state::<Popover>();
-        let mut p = popover.lock();
-        let same = p.profile_id.as_deref() == Some(profile_id);
+    let (pinned, same, just_hidden) = {
+        let p = popover(app);
+        (
+            p.pinned,
+            p.profile_id.as_deref() == Some(profile_id),
+            p.hidden_at
+                .is_some_and(|t| t.elapsed() < Duration::from_millis(350)),
+        )
+    };
+    match (visible, pinned) {
         // 固定中は、ほかのウィンドウの後ろに回っていることがあるので前に出す
-        if visible && p.pinned {
-            drop(p);
+        (true, true) => {
             let _ = win.set_focus();
-            open_popover(app, profile_id, rect, false);
-            return;
         }
-        if visible && same && !p.pinned {
-            p.hidden_at = Some(Instant::now());
-            drop(p);
-            let _ = win.hide();
-            return;
-        }
+        (true, false) if same => return hide_window(app),
         // このクリックでフォーカスが外れて隠れた直後なら、開き直さない
-        if !visible
-            && same
-            && p.hidden_at
-                .is_some_and(|t| t.elapsed() < Duration::from_millis(350))
-        {
-            return;
-        }
+        (false, _) if same && just_hidden => return,
+        _ => {}
     }
     open_popover(app, profile_id, rect, false);
 }
@@ -171,13 +178,13 @@ fn center_on(win: &WebviewWindow, monitor: &Monitor) {
 
 /// 設定画面を出すディスプレイ。ポップアップが出ていればその画面、なければトレイアイコンのある画面にする。
 fn settings_monitor(app: &AppHandle) -> Option<Monitor> {
-    let popover = app.get_webview_window(POPOVER);
-    if let Some(win) = popover.filter(|w| w.is_visible().unwrap_or(false)) {
+    let win = app.get_webview_window(POPOVER);
+    if let Some(win) = win.filter(|w| w.is_visible().unwrap_or(false)) {
         if let Ok(Some(monitor)) = win.current_monitor() {
             return Some(monitor);
         }
     }
-    let profile_id = app.state::<Popover>().lock().profile_id.clone();
+    let profile_id = popover(app).profile_id.clone();
     let rect = profile_id
         .and_then(|id| tray_rect(app, &id))
         .or_else(|| crate::tray::first_rect(app));
@@ -204,8 +211,7 @@ fn open_popover(app: &AppHandle, profile_id: &str, rect: Option<tauri::Rect>, re
     // ディスプレイの構成が変わると前回の位置は当てにならないので、取り直せなければ捨てる
     let anchor = rect.or_else(|| tray_rect(app, profile_id)).map(to_anchor);
     {
-        let popover = app.state::<Popover>();
-        let mut p = popover.lock();
+        let mut p = popover(app);
         p.profile_id = Some(profile_id.to_owned());
         p.anchor = anchor;
         p.pending_show = !visible;
@@ -219,8 +225,7 @@ fn open_popover(app: &AppHandle, profile_id: &str, rect: Option<tauri::Rect>, re
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(Duration::from_millis(800)).await;
         let pending = {
-            let popover = handle.state::<Popover>();
-            let p = popover.lock();
+            let p = popover(&handle);
             p.pending_show || p.reposition
         };
         if pending {
@@ -237,9 +242,12 @@ pub fn fit_popover(app: &AppHandle, height: f64) {
     let visible = win.is_visible().unwrap_or(false);
     // 状態を写し取ってからロックを離し、そのあとでウィンドウを操作する
     let (pinned, anchor, show, reposition, restore) = {
-        let popover = app.state::<Popover>();
-        let mut p = popover.lock();
+        let mut p = popover(app);
         let show = std::mem::take(&mut p.pending_show);
+        // 隠れている間も、画面は定期的に描き直して大きさを知らせてくる。次に開くときに測り直すので、ここでは動かさない
+        if !visible && !show {
+            return;
+        }
         let reposition = std::mem::take(&mut p.reposition);
         let restore = if show { p.restore.take() } else { None };
         (p.pinned, p.anchor, show, reposition, restore)
@@ -346,29 +354,22 @@ pub fn place(
 }
 
 pub fn set_pinned(app: &AppHandle, pinned: bool) {
-    app.state::<Popover>().lock().pinned = pinned;
+    popover(app).pinned = pinned;
     apply_on_top(app);
     save_pinned(app);
     let _ = app.emit_to(POPOVER, "popover-pinned", pinned);
 }
 
 pub fn hide_popover(app: &AppHandle) {
-    {
-        let popover = app.state::<Popover>();
-        let mut p = popover.lock();
-        p.pinned = false;
-        p.hidden_at = Some(Instant::now());
-    }
+    popover(app).pinned = false;
     apply_on_top(app);
     save_pinned(app);
-    if let Some(win) = app.get_webview_window(POPOVER) {
-        let _ = win.hide();
-    }
+    hide_window(app);
 }
 
 /// トレイから開いたポップアップはつねに最前面に出す。固定したものは設定に従う。
 pub fn apply_on_top(app: &AppHandle) {
-    let pinned = app.state::<Popover>().lock().pinned;
+    let pinned = popover(app).pinned;
     let on_top = !pinned || app.state::<AppState>().lock().config.settings.pinned_on_top;
     if let Some(win) = app.get_webview_window(POPOVER) {
         let _ = win.set_always_on_top(on_top);
@@ -378,8 +379,7 @@ pub fn apply_on_top(app: &AppHandle) {
 /// 固定の状態と位置を設定ファイルに書く。固定していなければ消す。
 pub fn save_pinned(app: &AppHandle) {
     let (pinned, profile_id) = {
-        let popover = app.state::<Popover>();
-        let p = popover.lock();
+        let p = popover(app);
         (p.pinned, p.profile_id.clone())
     };
     let position = app
@@ -404,8 +404,7 @@ pub fn save_pinned(app: &AppHandle) {
 /// 固定中に動かしたら、止まってから位置を保存する。ドラッグ中は何度も届くので、そのたびには書かない。
 fn save_pinned_after_move(app: &AppHandle) {
     let seq = {
-        let popover = app.state::<Popover>();
-        let mut p = popover.lock();
+        let mut p = popover(app);
         if !p.pinned {
             return;
         }
@@ -415,7 +414,7 @@ fn save_pinned_after_move(app: &AppHandle) {
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(Duration::from_millis(800)).await;
-        if handle.state::<Popover>().lock().moves == seq {
+        if popover(&handle).moves == seq {
             save_pinned(&handle);
         }
     });
@@ -447,8 +446,7 @@ pub fn restore_popover(app: &AppHandle) {
         return;
     }
     {
-        let popover = app.state::<Popover>();
-        let mut p = popover.lock();
+        let mut p = popover(app);
         p.pinned = true;
         p.restore = Some(PhysicalPosition::new(saved.x, saved.y));
     }
@@ -481,7 +479,7 @@ pub fn open_settings(app: &AppHandle) {
         .is_none()
         .then(|| settings_monitor(app))
         .flatten();
-    if !app.state::<Popover>().lock().pinned {
+    if !popover(app).pinned {
         if let Some(win) = app.get_webview_window(POPOVER) {
             let _ = win.hide();
         }
@@ -497,33 +495,27 @@ pub fn open_settings(app: &AppHandle) {
         crate::i18n::Lang::En => "Mira Settings",
     };
     let theme = window_theme(app);
-    let handle = app.clone();
-    // Windows では、メニューのイベントや同期コマンドの中（メインスレッド）でウィンドウを作ると
-    // WebView2 の初期化を待ったまま固まる。別のスレッドで作る
-    tauri::async_runtime::spawn(async move {
-        let result =
-            WebviewWindowBuilder::new(&handle, SETTINGS, WebviewUrl::App("settings.html".into()))
-                .title(title)
+    spawn_window(
+        app,
+        SETTINGS,
+        "settings.html",
+        move |b| {
+            b.title(title)
                 .inner_size(760.0, 640.0)
                 .min_inner_size(640.0, 480.0)
                 .theme(theme)
-                .visible(false)
-                .build();
-        match result {
-            Ok(win) => {
-                disable_browser_keys(&win);
-                match &monitor {
-                    Some(monitor) => center_on(&win, monitor),
-                    None => {
-                        let _ = win.center();
-                    }
+        },
+        move |win| {
+            match &monitor {
+                Some(monitor) => center_on(win, monitor),
+                None => {
+                    let _ = win.center();
                 }
-                let _ = win.show();
-                let _ = win.set_focus();
             }
-            Err(err) => eprintln!("設定画面を開けませんでした: {err}"),
-        }
-    });
+            let _ = win.show();
+            let _ = win.set_focus();
+        },
+    );
 }
 
 pub fn open_consent(app: &AppHandle) {
@@ -534,12 +526,13 @@ pub fn open_consent(app: &AppHandle) {
         return;
     }
     let theme = window_theme(app);
-    let handle = app.clone();
-    // 作る場所の注意は open_settings と同じ
-    tauri::async_runtime::spawn(async move {
-        let result =
-            WebviewWindowBuilder::new(&handle, CONSENT, WebviewUrl::App("consent.html".into()))
-                .title("Mira")
+    // 大きさが決まってから fit_consent で出す
+    spawn_window(
+        app,
+        CONSENT,
+        "consent.html",
+        move |b| {
+            b.title("Mira")
                 .inner_size(CONSENT_WIDTH, 480.0)
                 .resizable(false)
                 .maximizable(false)
@@ -549,16 +542,40 @@ pub fn open_consent(app: &AppHandle) {
                 .shadow(false)
                 .always_on_top(true)
                 .skip_taskbar(false)
-                .visible(false)
                 .theme(theme)
                 .center()
-                .build();
-        match result {
-            Ok(win) => disable_browser_keys(&win),
-            Err(err) => eprintln!("確認ダイアログを開けませんでした: {err}"),
+        },
+        |_| {},
+    );
+}
+
+/// 隠したままウィンドウを作り、`ready` に渡す。
+///
+/// Windows では、メニューのイベントや同期コマンドの中（メインスレッド）でウィンドウを作ると
+/// WebView2 の初期化を待ったまま固まる。別のスレッドで作る
+fn spawn_window(
+    app: &AppHandle,
+    label: &'static str,
+    page: &'static str,
+    configure: impl for<'a> FnOnce(Builder<'a>) -> Builder<'a> + Send + 'static,
+    ready: impl FnOnce(&WebviewWindow) + Send + 'static,
+) {
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let builder = WebviewWindowBuilder::new(&handle, label, WebviewUrl::App(page.into()))
+            .additional_browser_args(BROWSER_ARGS)
+            .visible(false);
+        match configure(builder).build() {
+            Ok(win) => {
+                disable_browser_keys(&win);
+                ready(&win);
+            }
+            Err(err) => eprintln!("{label} を開けませんでした: {err}"),
         }
     });
 }
+
+type Builder<'a> = WebviewWindowBuilder<'a, tauri::Wry, AppHandle>;
 
 /// 承諾ダイアログの内容に合わせて高さを変え、画面中央に出す。
 pub fn fit_consent(app: &AppHandle, height: f64) {
@@ -579,7 +596,20 @@ pub fn close_consent(app: &AppHandle) {
 
 #[cfg(test)]
 mod tests {
-    use super::place;
+    use super::{place, BROWSER_ARGS};
+
+    #[test]
+    fn popover_uses_the_same_browser_args() {
+        let conf: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        for win in conf["app"]["windows"].as_array().unwrap() {
+            assert_eq!(
+                win["additionalBrowserArgs"], BROWSER_ARGS,
+                "{}",
+                win["label"]
+            );
+        }
+    }
 
     const WORK: (i32, i32, i32, i32) = (0, 0, 1920, 1040);
 
