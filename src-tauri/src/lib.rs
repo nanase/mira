@@ -71,7 +71,6 @@ pub fn run() {
             app.manage(tray::TrayIds::default());
 
             let handle = app.handle();
-            windows::setup_popover(handle);
             windows::apply_theme(handle);
             tray::sync(handle);
             windows::restore_popover(handle);

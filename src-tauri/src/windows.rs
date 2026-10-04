@@ -18,10 +18,14 @@ pub const CONSENT: &str = "consent";
 ///
 /// - 前半は wry の既定値。引数を指定すると既定値が付かなくなるので、自分で入れる
 /// - `--disable-gpu` で GPU プロセスのメモリが約 70 MB 減る。描くものが軽いので、ソフトウェア描画で足りる
-///
-/// ポップアップは tauri.conf.json で作るので、そちらにも同じ値を書く（テストで照らし合わせている）。
-pub const BROWSER_ARGS: &str =
+const BROWSER_ARGS: &str =
     "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-gpu";
+
+/// 隠してからこの時間がたったら、ポップアップを破棄する。
+///
+/// ウィンドウがなくなると WebView2 のプロセスがすべて終わり、約 100 MB が返る。
+/// 作り直すと開くまでに 0.5 秒ほどかかるので、続けて開く間は残しておく。
+const DESTROY_AFTER: Duration = Duration::from_secs(5 * 60);
 
 /// ポップアップのウィンドウ幅（CSS px）。カード 320px と影の余白 10px ずつ。
 const POPOVER_WIDTH: f64 = 340.0;
@@ -41,6 +45,10 @@ pub struct PopoverState {
     restore: Option<PhysicalPosition<i32>>,
     /// 固定中に動かした回数。動かし終えてから位置を保存するのに使う
     moves: u64,
+    /// 隠した回数。隠したまま DESTROY_AFTER がたったかを見るのに使う
+    hides: u64,
+    /// ウィンドウを作っている途中。2 つ作らないようにする
+    creating: bool,
 }
 
 #[derive(Default)]
@@ -57,14 +65,35 @@ pub fn popover(app: &AppHandle) -> MutexGuard<'_, PopoverState> {
 }
 
 /// ポップアップを隠し、隠した時刻を覚える。トレイアイコンのクリックでフォーカスが外れて隠れたとき、
-/// 同じクリックで開き直さないために使う。
+/// 同じクリックで開き直さないために使う。DESTROY_AFTER のあいだ隠れたままなら破棄する。
 ///
 /// ロックはウィンドウを操作する前に離す。操作中に届くイベントの処理が同じロックを待つと固まる
 fn hide_window(app: &AppHandle) {
-    popover(app).hidden_at = Some(Instant::now());
+    let seq = {
+        let mut p = popover(app);
+        p.hidden_at = Some(Instant::now());
+        p.hides += 1;
+        p.hides
+    };
     if let Some(win) = app.get_webview_window(POPOVER) {
         let _ = win.hide();
     }
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(DESTROY_AFTER).await;
+        {
+            let p = popover(&handle);
+            // 隠したあとに開き直していれば数が進んでいる。開く途中なら pending_show が立っている
+            if p.hides != seq || p.pending_show || p.creating {
+                return;
+            }
+        }
+        if let Some(win) = handle.get_webview_window(POPOVER) {
+            if !win.is_visible().unwrap_or(true) {
+                let _ = win.destroy();
+            }
+        }
+    });
 }
 
 /// ブラウザとしてのショートカットキー（F5 の再読み込み、Ctrl+P の印刷など）を止める。
@@ -89,12 +118,38 @@ fn disable_browser_keys(win: &WebviewWindow) {
     }
 }
 
-/// ポップアップは起動時に隠して作っておき、フォーカスを失ったら隠す。
-pub fn setup_popover(app: &AppHandle) {
-    let Some(win) = app.get_webview_window(POPOVER) else {
+/// ポップアップは開くときに作る（作り方は tauri.conf.json にある）。フォーカスを失ったら隠す。
+///
+/// 画面は起動すると自分で状態を読みに来て、大きさを fit_popover で知らせてくる。そこで表示する
+fn create_popover(app: &AppHandle) {
+    let config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|w| w.label == POPOVER)
+        .cloned();
+    let Some(config) = config else {
         return;
     };
-    disable_browser_keys(&win);
+    let theme = window_theme(app);
+    let handle = app.clone();
+    spawn_window(
+        app,
+        POPOVER,
+        move |h| WebviewWindowBuilder::from_config(h, &config).map(|b| b.theme(theme)),
+        move |win| {
+            popover(&handle).creating = false;
+            if let Some(win) = win {
+                watch_popover(&handle, win);
+                apply_on_top(&handle);
+                show_if_silent(&handle);
+            }
+        },
+    );
+}
+
+fn watch_popover(app: &AppHandle, win: &WebviewWindow) {
     let handle = app.clone();
     win.on_window_event(move |event| {
         if let WindowEvent::Moved(_) = event {
@@ -113,10 +168,10 @@ pub fn setup_popover(app: &AppHandle) {
 ///
 /// `rect` が None（メニューから開いたとき）は、トレイアイコンの今の位置を取り直して使う。
 pub fn toggle_popover(app: &AppHandle, profile_id: &str, rect: Option<tauri::Rect>) {
-    let Some(win) = app.get_webview_window(POPOVER) else {
-        return;
-    };
-    let visible = win.is_visible().unwrap_or(false);
+    let win = app.get_webview_window(POPOVER);
+    let visible = win
+        .as_ref()
+        .is_some_and(|w| w.is_visible().unwrap_or(false));
     let (pinned, same, just_hidden) = {
         let p = popover(app);
         (
@@ -129,7 +184,9 @@ pub fn toggle_popover(app: &AppHandle, profile_id: &str, rect: Option<tauri::Rec
     match (visible, pinned) {
         // 固定中は、ほかのウィンドウの後ろに回っていることがあるので前に出す
         (true, true) => {
-            let _ = win.set_focus();
+            if let Some(win) = &win {
+                let _ = win.set_focus();
+            }
         }
         (true, false) if same => return hide_window(app),
         // このクリックでフォーカスが外れて隠れた直後なら、開き直さない
@@ -204,23 +261,36 @@ fn to_anchor(rect: tauri::Rect) -> (f64, f64, f64, f64) {
 }
 
 fn open_popover(app: &AppHandle, profile_id: &str, rect: Option<tauri::Rect>, reposition: bool) {
-    let Some(win) = app.get_webview_window(POPOVER) else {
-        return;
-    };
-    let visible = win.is_visible().unwrap_or(false);
+    let win = app.get_webview_window(POPOVER);
+    let visible = win
+        .as_ref()
+        .is_some_and(|w| w.is_visible().unwrap_or(false));
     // ディスプレイの構成が変わると前回の位置は当てにならないので、取り直せなければ捨てる
     let anchor = rect.or_else(|| tray_rect(app, profile_id)).map(to_anchor);
-    {
+    let create = {
         let mut p = popover(app);
         p.profile_id = Some(profile_id.to_owned());
         p.anchor = anchor;
         p.pending_show = !visible;
         p.reposition |= reposition;
-    }
+        let create = win.is_none() && !p.creating;
+        p.creating |= create;
+        create
+    };
     app.state::<AppState>().request_refresh(RefreshKind::Soft);
-    let _ = win.emit("popover-open", profile_id);
+    match win {
+        Some(win) => {
+            let _ = win.emit("popover-open", profile_id);
+            show_if_silent(app);
+        }
+        None if create => create_popover(app),
+        // 作っている途中なら、できあがった画面がいまの状態を読みに来る
+        None => {}
+    }
+}
 
-    // 画面側から大きさの通知が来なければ、そのままの大きさで出す
+/// 画面側から大きさの通知が来なければ、そのままの大きさで出す。
+fn show_if_silent(app: &AppHandle) {
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(Duration::from_millis(800)).await;
@@ -480,9 +550,7 @@ pub fn open_settings(app: &AppHandle) {
         .then(|| settings_monitor(app))
         .flatten();
     if !popover(app).pinned {
-        if let Some(win) = app.get_webview_window(POPOVER) {
-            let _ = win.hide();
-        }
+        hide_window(app);
     }
     if let Some(win) = app.get_webview_window(SETTINGS) {
         let _ = win.unminimize();
@@ -498,14 +566,19 @@ pub fn open_settings(app: &AppHandle) {
     spawn_window(
         app,
         SETTINGS,
-        "settings.html",
-        move |b| {
-            b.title(title)
-                .inner_size(760.0, 640.0)
-                .min_inner_size(640.0, 480.0)
-                .theme(theme)
+        move |h| {
+            Ok(
+                WebviewWindowBuilder::new(h, SETTINGS, WebviewUrl::App("settings.html".into()))
+                    .title(title)
+                    .inner_size(760.0, 640.0)
+                    .min_inner_size(640.0, 480.0)
+                    .theme(theme),
+            )
         },
         move |win| {
+            let Some(win) = win else {
+                return;
+            };
             match &monitor {
                 Some(monitor) => center_on(win, monitor),
                 None => {
@@ -530,47 +603,53 @@ pub fn open_consent(app: &AppHandle) {
     spawn_window(
         app,
         CONSENT,
-        "consent.html",
-        move |b| {
-            b.title("Mira")
-                .inner_size(CONSENT_WIDTH, 480.0)
-                .resizable(false)
-                .maximizable(false)
-                .minimizable(false)
-                .decorations(false)
-                // 影を付けると Windows 10 では高さがタイトルバー分ずれるので、枠は CSS で描く
-                .shadow(false)
-                .always_on_top(true)
-                .skip_taskbar(false)
-                .theme(theme)
-                .center()
+        move |h| {
+            Ok(
+                WebviewWindowBuilder::new(h, CONSENT, WebviewUrl::App("consent.html".into()))
+                    .title("Mira")
+                    .inner_size(CONSENT_WIDTH, 480.0)
+                    .resizable(false)
+                    .maximizable(false)
+                    .minimizable(false)
+                    .decorations(false)
+                    // 影を付けると Windows 10 では高さがタイトルバー分ずれるので、枠は CSS で描く
+                    .shadow(false)
+                    .always_on_top(true)
+                    .skip_taskbar(false)
+                    .theme(theme)
+                    .center(),
+            )
         },
         |_| {},
     );
 }
 
-/// 隠したままウィンドウを作り、`ready` に渡す。
+/// 隠したままウィンドウを作り、`ready` に渡す。作れなければ None を渡す。
 ///
 /// Windows では、メニューのイベントや同期コマンドの中（メインスレッド）でウィンドウを作ると
 /// WebView2 の初期化を待ったまま固まる。別のスレッドで作る
 fn spawn_window(
     app: &AppHandle,
     label: &'static str,
-    page: &'static str,
-    configure: impl for<'a> FnOnce(Builder<'a>) -> Builder<'a> + Send + 'static,
-    ready: impl FnOnce(&WebviewWindow) + Send + 'static,
+    builder: impl for<'a> FnOnce(&'a AppHandle) -> tauri::Result<Builder<'a>> + Send + 'static,
+    ready: impl FnOnce(Option<&WebviewWindow>) + Send + 'static,
 ) {
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
-        let builder = WebviewWindowBuilder::new(&handle, label, WebviewUrl::App(page.into()))
-            .additional_browser_args(BROWSER_ARGS)
-            .visible(false);
-        match configure(builder).build() {
+        let result = builder(&handle).and_then(|b| {
+            b.additional_browser_args(BROWSER_ARGS)
+                .visible(false)
+                .build()
+        });
+        match result {
             Ok(win) => {
                 disable_browser_keys(&win);
-                ready(&win);
+                ready(Some(&win));
             }
-            Err(err) => eprintln!("{label} を開けませんでした: {err}"),
+            Err(err) => {
+                eprintln!("{label} を開けませんでした: {err}");
+                ready(None);
+            }
         }
     });
 }
@@ -596,20 +675,7 @@ pub fn close_consent(app: &AppHandle) {
 
 #[cfg(test)]
 mod tests {
-    use super::{place, BROWSER_ARGS};
-
-    #[test]
-    fn popover_uses_the_same_browser_args() {
-        let conf: serde_json::Value =
-            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
-        for win in conf["app"]["windows"].as_array().unwrap() {
-            assert_eq!(
-                win["additionalBrowserArgs"], BROWSER_ARGS,
-                "{}",
-                win["label"]
-            );
-        }
-    }
+    use super::place;
 
     const WORK: (i32, i32, i32, i32) = (0, 0, 1920, 1040);
 
