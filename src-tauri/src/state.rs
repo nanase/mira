@@ -144,11 +144,18 @@ pub struct ProfileView {
     pub last_success_ms: Option<i64>,
 }
 
+#[derive(Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum RowKind {
+    Session,
+    Weekly,
+    Extra,
+}
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct RowView {
-    /// session / weekly / extra
-    pub kind: &'static str,
+    pub kind: RowKind,
     /// 使用率（0〜100）。残り表示への変換は画面側で行う
     pub used: f64,
     pub resets_at_ms: Option<i64>,
@@ -167,11 +174,18 @@ pub struct MoneyView {
     pub currency: String,
 }
 
+#[derive(Serialize, Clone, Copy)]
+#[serde(rename_all = "camelCase")]
+pub enum BannerKind {
+    Expired,
+    Failed,
+    Stale,
+}
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct BannerView {
-    /// expired / failed / stale
-    pub kind: &'static str,
+    pub kind: BannerKind,
     pub failures: u32,
     pub minutes: i64,
 }
@@ -184,22 +198,20 @@ fn money(m: &api::Money) -> MoneyView {
 }
 
 fn window_row(
-    kind: &'static str,
+    kind: RowKind,
     w: &api::Window,
     duration: f64,
     now: DateTime<Utc>,
     show_remaining: bool,
 ) -> RowView {
-    let expired = w.resets_at.is_some_and(|r| r <= now);
-    // 窓が終わっていれば使用率は 0 に戻っている
-    let used = if expired { 0.0 } else { w.percent };
+    let used = w.percent_at(now);
     let elapsed = pace::elapsed_fraction(w.resets_at, duration, now);
     RowView {
         kind,
         used,
         resets_at_ms: w
             .resets_at
-            .filter(|_| !expired)
+            .filter(|_| !w.expired(now))
             .map(|r| r.timestamp_millis()),
         elapsed,
         level: pace::level(used, elapsed, show_remaining),
@@ -213,7 +225,7 @@ pub fn rows(usage: &Usage, now: DateTime<Utc>, show_remaining: bool) -> Vec<RowV
     let mut rows = Vec::new();
     if let Some(w) = &usage.session {
         rows.push(window_row(
-            "session",
+            RowKind::Session,
             w,
             pace::SESSION_SECS,
             now,
@@ -222,7 +234,7 @@ pub fn rows(usage: &Usage, now: DateTime<Utc>, show_remaining: bool) -> Vec<RowV
     }
     if let Some(w) = &usage.weekly {
         rows.push(window_row(
-            "weekly",
+            RowKind::Weekly,
             w,
             pace::WEEK_SECS,
             now,
@@ -231,7 +243,7 @@ pub fn rows(usage: &Usage, now: DateTime<Utc>, show_remaining: bool) -> Vec<RowV
     }
     if let Some(extra) = &usage.extra {
         rows.push(RowView {
-            kind: "extra",
+            kind: RowKind::Extra,
             used: extra.percent,
             resets_at_ms: None,
             elapsed: None,
@@ -247,21 +259,21 @@ pub fn rows(usage: &Usage, now: DateTime<Utc>, show_remaining: bool) -> Vec<RowV
 pub fn banner(rt: &Runtime, settings: &Settings, now: DateTime<Utc>) -> Option<BannerView> {
     if rt.auth_error {
         return Some(BannerView {
-            kind: "expired",
+            kind: BannerKind::Expired,
             failures: rt.failures,
             minutes: 0,
         });
     }
     if rt.failures >= 3 {
         return Some(BannerView {
-            kind: "failed",
+            kind: BannerKind::Failed,
             failures: rt.failures,
             minutes: 0,
         });
     }
     let age = (now - rt.last_success?).num_minutes();
     (age > settings.refresh_minutes as i64 + 2).then_some(BannerView {
-        kind: "stale",
+        kind: BannerKind::Stale,
         failures: rt.failures,
         minutes: age,
     })
@@ -387,13 +399,7 @@ async fn refresh(state: &AppState) {
             Ok(usage) => {
                 let point = Point {
                     t: now.timestamp_millis(),
-                    s: usage.session.as_ref().map(|w| {
-                        if w.resets_at.is_some_and(|r| r <= now) {
-                            0.0
-                        } else {
-                            w.percent
-                        }
-                    }),
+                    s: usage.session.as_ref().map(|w| w.percent_at(now)),
                     w: usage.weekly.as_ref().map(|w| w.percent),
                 };
                 rt.usage = Some(usage);

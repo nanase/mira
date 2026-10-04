@@ -3,7 +3,7 @@
 use crate::config::IconStyle;
 use crate::i18n::{self, Lang};
 use crate::icon::{self, IconSpec, Meter};
-use crate::state::{self, AppState, RefreshKind};
+use crate::state::{self, AppState, RefreshKind, RowKind};
 use crate::windows;
 use chrono::{DateTime, Utc};
 use std::sync::Mutex;
@@ -90,7 +90,7 @@ fn build_contents(app: &AppHandle) -> Vec<TrayContent> {
             let rows = usage
                 .map(|u| state::rows(u, now, settings.show_remaining))
                 .unwrap_or_default();
-            let find = |kind: &str| rows.iter().find(|r| r.kind == kind);
+            let find = |kind: RowKind| rows.iter().find(|r| r.kind == kind);
             let meter = |r: &state::RowView| Meter {
                 percent: if settings.show_remaining {
                     (100.0 - r.used).max(0.0)
@@ -103,14 +103,14 @@ fn build_contents(app: &AppHandle) -> Vec<TrayContent> {
                     .map(|e| if settings.show_remaining { 1.0 - e } else { e }),
                 pace: r.pace,
             };
-            let session = find("session").map(meter);
+            let session = find(RowKind::Session).map(meter);
             let spec = IconSpec {
                 style: settings.icon_style,
                 size,
                 dark_taskbar: dark,
                 mono,
                 session,
-                weekly: find("weekly").map(meter),
+                weekly: find(RowKind::Weekly).map(meter),
                 show_marker: settings.tray_marker,
                 pace_marker: settings.marker_mode == crate::config::MarkerMode::Pace,
                 letter: if multi {
@@ -131,7 +131,7 @@ fn build_contents(app: &AppHandle) -> Vec<TrayContent> {
                 let failed = rt.is_some_and(|r| r.failures > 0);
                 tooltip += &format!("\n{}", if failed { t.fetch_failed } else { t.loading });
             } else {
-                for (kind, label) in [("session", t.session), ("weekly", t.weekly)] {
+                for (kind, label) in [(RowKind::Session, t.session), (RowKind::Weekly, t.weekly)] {
                     if let Some(r) = find(kind) {
                         let resets = r
                             .resets_at_ms

@@ -13,6 +13,21 @@ pub struct Window {
     pub resets_at: Option<DateTime<Utc>>,
 }
 
+impl Window {
+    /// リセット時刻を過ぎていれば、窓が終わって使用率は 0 に戻っている。
+    pub fn expired(&self, now: DateTime<Utc>) -> bool {
+        self.resets_at.is_some_and(|r| r <= now)
+    }
+
+    pub fn percent_at(&self, now: DateTime<Utc>) -> f64 {
+        if self.expired(now) {
+            0.0
+        } else {
+            self.percent
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Money {
     pub amount: f64,
